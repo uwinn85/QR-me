@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Resto QR Pro</title>
+    <meta name="description" content="Sistem Pemesanan QR & POS Restoran Terintegrasi Firebase Realtime" />
+    <meta property="og:title" content="Resto QR Pro" />
+    <meta property="og:description" content="Sistem Pemesanan QR & POS Restoran Terintegrasi Firebase Realtime" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Fix for extensions or environments attempting to set window.fetch
+      (function() {
+        try {
+          var originalFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return originalFetch;
+            },
+            set: function(fn) {
+              originalFetch = fn;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          // ignore
+        }
+
+        // Suppress external browser extension runtime errors from bubbling to app
+        window.addEventListener('error', function(event) {
+          if (
+            (event.filename && event.filename.includes('chrome-extension://')) ||
+            (event.message && (
+              event.message.includes('Cannot set property fetch') ||
+              event.message.includes('chrome-extension://')
+            ))
+          ) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (
+            event.reason && (
+              String(event.reason).includes('Cannot set property fetch') ||
+              String(event.reason?.stack || '').includes('chrome-extension://')
+            )
+          ) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-zinc-100 text-zinc-900 font-sans antialiased selection:bg-rose-500 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

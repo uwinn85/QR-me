@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connectivity test document
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Public restaurant settings, menu, categories, tables, and payment methods
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /menu/{menuId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /paymentMethods/{paymentMethodId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /tables/{tableId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /staff/{staffId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Restaurant orders (QR customers can create and read orders; POS can update status)
+    match /orders/{orderId} {
+      allow read, list: if true;
+      allow create: if request.resource.data.id is string;
+      allow update: if request.resource.data.id is string;
+      allow delete: if true;
+    }
+  }
+}

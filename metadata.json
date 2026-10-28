@@ -1,0 +1,8 @@
+{
+  "name": "Resto QR Pro",
+  "description": "Sistem Pemesanan QR & POS Restoran Terintegrasi Firebase Realtime",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

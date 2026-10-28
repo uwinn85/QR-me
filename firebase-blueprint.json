@@ -1,0 +1,146 @@
+{
+  "entities": {
+    "Setting": {
+      "title": "Setting",
+      "description": "Pengaturan umum restoran dan struk pembayaran",
+      "type": "object",
+      "properties": {
+        "restoName": { "type": "string", "maxLength": 100 },
+        "taxRate": { "type": "number" },
+        "serviceCharge": { "type": "number" },
+        "orderPrefix": { "type": "string", "maxLength": 10 },
+        "staticQris": { "type": "string", "maxLength": 500 },
+        "appBackground": { "type": "string", "maxLength": 500 },
+        "restoAddress": { "type": "string", "maxLength": 200 },
+        "restoPhone": { "type": "string", "maxLength": 50 },
+        "soundEnabled": { "type": "boolean" },
+        "voiceType": { "type": "string", "maxLength": 20 },
+        "callTemplate": { "type": "string", "maxLength": 200 },
+        "receiptHeaderNote": { "type": "string", "maxLength": 200 },
+        "receiptFooterNote": { "type": "string", "maxLength": 200 },
+        "receiptShowAddress": { "type": "boolean" },
+        "receiptShowPhone": { "type": "boolean" },
+        "receiptShowCashier": { "type": "boolean" },
+        "receiptPaperWidth": { "type": "string", "maxLength": 20 }
+      },
+      "required": ["restoName", "taxRate", "serviceCharge"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Kategori produk menu restoran",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 50 },
+        "name": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "name"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Item menu hidangan dan minuman",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 50 },
+        "name": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "category": { "type": "string", "maxLength": 50 },
+        "image": { "type": "string", "maxLength": 500 },
+        "description": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["name", "price", "category"]
+    },
+    "PaymentMethod": {
+      "title": "PaymentMethod",
+      "description": "Metode pembayaran yang tersedia",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 50 },
+        "name": { "type": "string", "maxLength": 50 },
+        "type": { "type": "string", "maxLength": 20 },
+        "isActive": { "type": "boolean" },
+        "instructions": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["id", "name", "type", "isActive"]
+    },
+    "Table": {
+      "title": "Table",
+      "description": "Daftar meja restoran untuk QR Code",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 50 },
+        "name": { "type": "string", "maxLength": 50 },
+        "link": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "name", "link"]
+    },
+    "StaffUser": {
+      "title": "StaffUser",
+      "description": "Akun staff dan kasir untuk login dashboard POS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 50 },
+        "username": { "type": "string", "maxLength": 50 },
+        "pin": { "type": "string", "maxLength": 6 },
+        "role": { "type": "string", "maxLength": 20 },
+        "name": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["username", "pin", "role", "name"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Pesanan pelanggan melalui scan QR atau kasir POS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 50 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "table": { "type": "string", "maxLength": 50 },
+        "orderType": { "type": "string", "maxLength": 20 },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "tax": { "type": "number" },
+        "service": { "type": "number" },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "status": { "type": "string", "maxLength": 20 },
+        "time": { "type": "string", "maxLength": 50 },
+        "source": { "type": "string", "maxLength": 20 },
+        "cashGiven": { "type": "number" },
+        "changeAmount": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "customerName", "table", "orderType", "items", "total", "status"]
+    }
+  },
+  "firestore": {
+    "/settings/general": {
+      "schema": "#/entities/Setting",
+      "description": "Pengaturan tunggal restoran"
+    },
+    "/categories/{categoryId}": {
+      "schema": "#/entities/Category",
+      "description": "Daftar kategori menu restoran"
+    },
+    "/menu/{menuId}": {
+      "schema": "#/entities/MenuItem",
+      "description": "Katalog menu hidangan restoran"
+    },
+    "/paymentMethods/{paymentMethodId}": {
+      "schema": "#/entities/PaymentMethod",
+      "description": "Daftar metode pembayaran"
+    },
+    "/tables/{tableId}": {
+      "schema": "#/entities/Table",
+      "description": "Daftar meja restoran"
+    },
+    "/staff/{staffId}": {
+      "schema": "#/entities/StaffUser",
+      "description": "Daftar akun staff restoran"
+    },
+    "/orders/{orderId}": {
+      "schema": "#/entities/Order",
+      "description": "Daftar transaksi pesanan restoran"
+    }
+  }
+}
