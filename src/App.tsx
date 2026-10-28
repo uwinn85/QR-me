@@ -84,6 +84,11 @@ export default function App() {
   const [showCart, setShowCart] = useState(false);
   const [checkoutData, setCheckoutData] = useState({ paymentMethod: '', notes: '' });
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [showOrderTrackerModal, setShowOrderTrackerModal] = useState<boolean>(false);
+  const [showTableSelectModal, setShowTableSelectModal] = useState<boolean>(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState<boolean>(false);
+  const [isSubmittingPos, setIsSubmittingPos] = useState<boolean>(false);
+  const lastOrderSubmissionRef = useRef<{ time: number; cartSignature: string }>({ time: 0, cartSignature: '' });
 
   // Staff Login Form
   const [loginForm, setLoginForm] = useState({ username: '', pin: '' });
@@ -239,6 +244,25 @@ export default function App() {
     e.preventDefault();
     if (customerTable.trim() || customerOrderType === 'takeaway') {
       setView('customer');
+      setShowTableSelectModal(false);
+    }
+  };
+
+  const startOrdering = (type: 'dine-in' | 'takeaway', tableNum = '') => {
+    setCustomerOrderType(type);
+    if (type === 'takeaway') {
+      setCustomerTable('Takeaway');
+      setView('customer');
+      setShowTableSelectModal(false);
+    } else {
+      const selected = tableNum.trim() || customerTable.trim();
+      if (selected) {
+        setCustomerTable(selected);
+        setView('customer');
+        setShowTableSelectModal(false);
+      } else {
+        setShowTableSelectModal(true);
+      }
     }
   };
 
@@ -269,12 +293,32 @@ export default function App() {
   };
 
   const handleCustomerCheckout = async () => {
+    if (isSubmittingOrder) return;
+
     if (!customerName.trim()) {
       showAlert('Nama Diperlukan', 'Mohon masukkan nama pemesan sebelum mengirim pesanan.');
       return;
     }
     if (!checkoutData.paymentMethod || customerCart.length === 0) return;
 
+    // Cegah Pesanan Ganda (Double submit protection)
+    const cartSignature = customerCart
+      .map((c) => `${c.id}:${c.quantity}`)
+      .sort()
+      .join('|') + `|${customerTable}|${customerName.trim()}`;
+    const now = Date.now();
+    if (
+      lastOrderSubmissionRef.current.cartSignature === cartSignature &&
+      now - lastOrderSubmissionRef.current.time < 6000
+    ) {
+      showAlert(
+        'Pesanan Sudah Terkirim',
+        'Pesanan yang sama baru saja terkirim ke dapur. Mohon tunggu proses pesanan Anda agar tidak terjadi duplikasi.'
+      );
+      return;
+    }
+
+    setIsSubmittingOrder(true);
     const sub = calculateSubtotal(customerCart);
     const newOrder: Order = {
       id: generateOrderId(),
@@ -297,12 +341,20 @@ export default function App() {
 
     try {
       await createOrder(newOrder);
+      lastOrderSubmissionRef.current = { time: Date.now(), cartSignature };
       setActiveOrder(newOrder);
       setReceiptOrder(newOrder);
       setCustomerCart([]);
       setShowCart(false);
+      // Customer remains on menu page; alert confirms submission
+      showAlert(
+        'Pesanan Berhasil Dikirim!',
+        `Pesanan ${newOrder.id} telah masuk ke sistem restoran. Anda tetap berada di halaman menu untuk menambah pesanan jika diperlukan.`
+      );
     } catch (err) {
       showAlert('Gagal Mengirim', 'Terjadi kendala saat mengirim pesanan ke server Firestore.');
+    } finally {
+      setIsSubmittingOrder(false);
     }
   };
 
@@ -334,6 +386,7 @@ export default function App() {
   };
 
   const handlePosCheckout = async () => {
+    if (isSubmittingPos) return;
     if (!posPaymentMethod || posCart.length === 0) return;
     const totalAmt = calculateTotal(posCart);
     const selectedPm = paymentMethods.find((p) => p.id === posPaymentMethod);
@@ -351,6 +404,7 @@ export default function App() {
       changeNum = cashGivenNum - totalAmt;
     }
 
+    setIsSubmittingPos(true);
     const sub = calculateSubtotal(posCart);
     const newOrder: Order = {
       id: generateOrderId(),
@@ -381,6 +435,8 @@ export default function App() {
       setReceiptOrder(newOrder);
     } catch (err) {
       showAlert('Gagal Menyimpan', 'Terjadi kendala saat menyimpan transaksi di Firestore.');
+    } finally {
+      setIsSubmittingPos(false);
     }
   };
 
@@ -1127,6 +1183,7 @@ export default function App() {
                   if (found) {
                     setShowCheckStatusModal(false);
                     setActiveOrder(found);
+                    setShowOrderTrackerModal(true);
                     setView('customer');
                   } else {
                     showAlert('Tidak Ditemukan', `Pesanan dengan ID ${searchId} tidak ditemukan.`);
@@ -1233,76 +1290,651 @@ export default function App() {
         </div>
       )}
 
-      {/* LANDING VIEW */}
-      {view === 'landing' && (
-        <div className="min-h-screen bg-gradient-to-br from-rose-600 via-rose-700 to-rose-900 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 sm:p-8 z-10 text-center border border-rose-100">
-            <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm14 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-              </svg>
+      {/* Order Tracker Modal */}
+      {showOrderTrackerModal && activeOrder && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-5 sm:p-6 text-center border border-zinc-200 flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-3 border-b border-zinc-100 pb-2">
+              <h3 className="text-base font-bold text-zinc-900">Status Pesanan Realtime</h3>
+              <button
+                onClick={() => setShowOrderTrackerModal(false)}
+                className="text-zinc-400 hover:text-zinc-600 p-1 font-bold"
+              >
+                ✕
+              </button>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 mb-1">{settings.restoName}</h1>
-            <p className="text-zinc-500 text-xs sm:text-sm mb-6">Pesan menu langsung dari meja Anda dengan update realtime Firebase.</p>
+            {(() => {
+              const live = orders.find((o) => o.id === activeOrder.id) || activeOrder;
+              const status = live.status;
+              return (
+                <div className="overflow-y-auto flex-1">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3 border-4 border-white shadow-md ${
+                    status === 'completed' ? 'bg-emerald-100 text-emerald-600' :
+                    status === 'processing' ? 'bg-blue-100 text-blue-600 animate-pulse' : 'bg-amber-100 text-amber-600'
+                  }`}>
+                    {status === 'completed' ? (
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    ) : status === 'processing' ? (
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    ) : (
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    )}
+                  </div>
 
-            <form onSubmit={handleCustomerLogin} className="space-y-4 text-left">
-              <div>
-                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Tipe Pesanan</label>
-                <div className="flex bg-zinc-100 p-1 rounded-xl border border-zinc-200">
-                  <button
-                    type="button"
-                    onClick={() => setCustomerOrderType('dine-in')}
-                    className={`flex-1 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all ${customerOrderType === 'dine-in' ? 'bg-white shadow text-rose-600' : 'text-zinc-500 hover:text-zinc-700'}`}
-                  >
-                    Makan di Tempat
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCustomerOrderType('takeaway')}
-                    className={`flex-1 py-2 sm:py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all ${customerOrderType === 'takeaway' ? 'bg-white shadow text-rose-600' : 'text-zinc-500 hover:text-zinc-700'}`}
-                  >
-                    Bawa Pulang
-                  </button>
+                  <h4 className="text-base font-bold text-zinc-900 mb-0.5">
+                    {status === 'completed' ? 'Pesanan Selesai / Siap Diambil!' :
+                     status === 'processing' ? 'Sedang Dimasak di Dapur' : 'Menunggu Konfirmasi Kasir'}
+                  </h4>
+                  <p className="text-zinc-500 text-xs mb-3">
+                    {live.orderType === 'takeaway' ? 'Tipe: Bawa Pulang' : `Meja: ${live.table}`} • ID: {live.id}
+                  </p>
+
+                  <div className="bg-zinc-50 rounded-2xl p-3.5 text-left border border-zinc-200 mb-3 text-xs">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-zinc-500">ID Pesanan:</span>
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-mono font-bold text-zinc-900">{live.id}</span>
+                        <button
+                          onClick={async () => {
+                            const ok = await copyToClipboardText(live.id);
+                            if (ok) showAlert('Berhasil', 'ID Pesanan disalin!');
+                          }}
+                          className="text-[10px] bg-white border border-zinc-200 px-2 py-0.5 rounded font-bold hover:bg-zinc-100"
+                        >
+                          Salin
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1 border-t border-zinc-200 pt-2">
+                      {live.items.map((it, idx) => (
+                        <div key={idx} className="flex justify-between">
+                          <span>{it.quantity}x {it.name}</span>
+                          <span className="font-semibold">Rp {(it.price * it.quantity).toLocaleString('id-ID')}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2.5 pt-2 border-t border-zinc-200 flex justify-between font-bold text-sm">
+                      <span>Total:</span>
+                      <span className="text-rose-600">Rp {live.total.toLocaleString('id-ID')}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setReceiptOrder(live)}
+                      className="flex-1 bg-rose-50 text-rose-700 font-bold py-2.5 rounded-xl hover:bg-rose-100 text-xs transition-colors"
+                    >
+                      Buka Struk Pembayaran
+                    </button>
+                    <button
+                      onClick={() => setShowOrderTrackerModal(false)}
+                      className="flex-1 bg-zinc-900 text-white font-bold py-2.5 rounded-xl text-xs hover:bg-zinc-800 transition-colors"
+                    >
+                      Kembali ke Menu
+                    </button>
+                  </div>
                 </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Table & Order Type Selection Modal */}
+      {showTableSelectModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl border border-zinc-100">
+            <div className="flex justify-between items-center mb-3 border-b border-zinc-100 pb-2">
+              <h3 className="text-base font-bold text-zinc-900">Pilih Meja Pemesanan</h3>
+              <button
+                onClick={() => setShowTableSelectModal(false)}
+                className="text-zinc-400 hover:text-zinc-600 p-1 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-zinc-500 mb-4">
+              Silakan pilih opsi makan di tempat atau bawa pulang untuk membuka buku menu.
+            </p>
+
+            <form onSubmit={handleCustomerLogin} className="space-y-4">
+              <div className="grid grid-cols-2 gap-2 bg-zinc-100 p-1 rounded-2xl border border-zinc-200">
+                <button
+                  type="button"
+                  onClick={() => setCustomerOrderType('dine-in')}
+                  className={`py-2 rounded-xl font-bold text-xs transition-all ${
+                    customerOrderType === 'dine-in' ? 'bg-white text-rose-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                  }`}
+                >
+                  Makan di Tempat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerOrderType('takeaway');
+                    setCustomerTable('Takeaway');
+                  }}
+                  className={`py-2 rounded-xl font-bold text-xs transition-all ${
+                    customerOrderType === 'takeaway' ? 'bg-white text-rose-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                  }`}
+                >
+                  Bawa Pulang
+                </button>
               </div>
 
               {customerOrderType === 'dine-in' && (
                 <div>
-                  <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Nomor / Nama Meja</label>
+                  <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1 block">
+                    Nomor / Nama Meja
+                  </label>
                   <input
                     type="text"
-                    placeholder="Contoh: 1, 2, atau VIP"
+                    placeholder="Contoh: 1, 2, VIP"
                     required={customerOrderType === 'dine-in'}
                     value={customerTable}
                     onChange={(e) => setCustomerTable(e.target.value)}
-                    className="w-full px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-xl text-center text-lg font-bold focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-200 transition-all uppercase"
+                    className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-center text-base font-bold focus:border-rose-500 outline-none uppercase"
                   />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {tables.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setCustomerTable(t.name.replace(/\D/g, '') || t.name)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                          customerTable === (t.name.replace(/\D/g, '') || t.name)
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700'
+                        }`}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
               <button
                 type="submit"
-                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-rose-500/30 transition-all text-sm"
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-md text-xs sm:text-sm transition-all"
               >
-                Lihat Menu & Mulai Pesan
+                Buka Menu Makanan
               </button>
             </form>
-
-            <div className="mt-5 pt-4 border-t border-zinc-100 flex flex-col gap-2">
-              <button
-                onClick={() => setShowCheckStatusModal(true)}
-                className="w-full bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold py-2.5 rounded-xl text-xs transition-colors"
-              >
-                🔍 Cek Status Pesanan Saya (Realtime)
-              </button>
-              <button
-                onClick={() => setView('admin_login')}
-                className="text-xs font-semibold text-zinc-400 hover:text-rose-600 transition-colors pt-1"
-              >
-                🔐 Masuk sebagai Staff / Kasir / Admin
-              </button>
-            </div>
           </div>
+        </div>
+      )}
+
+      {/* STORE LANDING PAGE (LANDING PAGE TOKO) */}
+      {view === 'landing' && (
+        <div className="min-h-screen bg-zinc-50 text-zinc-900 flex flex-col font-sans">
+          {/* Store Navbar */}
+          <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-zinc-200 shadow-xs">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-600 to-rose-500 text-white flex items-center justify-center font-black text-lg shadow-md shadow-rose-500/20">
+                  🍽️
+                </div>
+                <div>
+                  <h1 className="text-base sm:text-lg font-black text-zinc-900 leading-tight">
+                    {settings.restoName}
+                  </h1>
+                  <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Buka Hari Ini (10:00 - 22:00 WIB)
+                  </p>
+                </div>
+              </div>
+
+              {/* Desktop links */}
+              <nav className="hidden md:flex items-center space-x-6 text-xs font-semibold text-zinc-600">
+                <a href="#menu-populer" className="hover:text-rose-600 transition-colors">Menu Populer</a>
+                <a href="#cara-pesan" className="hover:text-rose-600 transition-colors">Cara Pesan</a>
+                <a href="#keunggulan" className="hover:text-rose-600 transition-colors">Keunggulan</a>
+                <a href="#lokasi" className="hover:text-rose-600 transition-colors">Lokasi & Kontak</a>
+              </nav>
+
+              {/* Header Action Buttons */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setShowCheckStatusModal(true)}
+                  className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs rounded-xl transition-colors flex items-center space-x-1"
+                >
+                  <span>🔍</span>
+                  <span className="hidden sm:inline">Cek Status</span>
+                </button>
+                <button
+                  onClick={() => startOrdering('dine-in')}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-md shadow-rose-600/20 transition-all flex items-center space-x-1"
+                >
+                  <span>🍽️</span>
+                  <span>Buka Menu</span>
+                </button>
+                <button
+                  onClick={() => setView('admin_login')}
+                  className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 rounded-xl transition-colors text-xs font-bold"
+                  title="Login Staff / Kasir"
+                >
+                  🔐
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* Hero Section */}
+          <section className="relative overflow-hidden bg-gradient-to-b from-rose-50/70 via-white to-zinc-50 py-10 sm:py-16 border-b border-zinc-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+                
+                {/* Hero Left Content */}
+                <div className="lg:col-span-7 space-y-5 text-center lg:text-left">
+                  <div className="inline-flex items-center space-x-2 px-3 py-1 bg-rose-100 text-rose-800 rounded-full text-xs font-bold">
+                    <span>⭐ 4.9 Rating (1.850+ Ulasan Puas)</span>
+                    <span className="text-rose-300">•</span>
+                    <span>100% Halal & Higienis</span>
+                  </div>
+
+                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-zinc-950 tracking-tight leading-[1.15]">
+                    Cita Rasa Autentik Nusantara, <span className="text-rose-600">Pesan Instan</span> dari Meja Anda
+                  </h1>
+
+                  <p className="text-zinc-600 text-xs sm:text-sm lg:text-base leading-relaxed max-w-2xl mx-auto lg:mx-0">
+                    Nikmati aneka hidangan resep istimewa di <b>{settings.restoName}</b>. Tanpa perlu antre di kasir, cukup pilih nomor meja atau bungkus (takeaway) langsung dari ponsel Anda.
+                  </p>
+
+                  {/* Highlights Strip */}
+                  <div className="grid grid-cols-3 gap-2.5 pt-2 max-w-lg mx-auto lg:mx-0">
+                    <div className="bg-white p-3 rounded-2xl border border-zinc-200 shadow-xs text-center">
+                      <span className="text-lg">⚡</span>
+                      <p className="font-bold text-xs text-zinc-900 mt-0.5">Pesan Mandiri</p>
+                      <p className="text-[10px] text-zinc-500">Scan QR langsung</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-2xl border border-zinc-200 shadow-xs text-center">
+                      <span className="text-lg">💳</span>
+                      <p className="font-bold text-xs text-zinc-900 mt-0.5">QRIS & Tunai</p>
+                      <p className="text-[10px] text-zinc-500">Dinamis & otomatis</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-2xl border border-zinc-200 shadow-xs text-center">
+                      <span className="text-lg">🍲</span>
+                      <p className="font-bold text-xs text-zinc-900 mt-0.5">Selalu Segar</p>
+                      <p className="text-[10px] text-zinc-500">Masak saat dipesan</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hero Right Quick Order Box */}
+                <div className="lg:col-span-5">
+                  <div className="bg-white rounded-3xl p-6 sm:p-7 shadow-xl border border-zinc-200 relative">
+                    <div className="flex items-center justify-between mb-4 border-b border-zinc-100 pb-3">
+                      <div>
+                        <h3 className="font-black text-base text-zinc-900">Mulai Pemesanan</h3>
+                        <p className="text-xs text-zinc-500">Pilih opsi makan di tempat atau bungkus</p>
+                      </div>
+                      <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold text-[10px] rounded-full border border-emerald-200">
+                        Sistem Online
+                      </span>
+                    </div>
+
+                    <form onSubmit={handleCustomerLogin} className="space-y-4">
+                      <div>
+                        <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">
+                          Tipe Pesanan
+                        </label>
+                        <div className="grid grid-cols-2 gap-2 bg-zinc-100 p-1 rounded-2xl border border-zinc-200">
+                          <button
+                            type="button"
+                            onClick={() => setCustomerOrderType('dine-in')}
+                            className={`py-2.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center space-x-1.5 ${
+                              customerOrderType === 'dine-in'
+                                ? 'bg-white text-rose-600 shadow-sm'
+                                : 'text-zinc-600 hover:text-zinc-900'
+                            }`}
+                          >
+                            <span>🍽️</span>
+                            <span>Makan di Tempat</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomerOrderType('takeaway');
+                              setCustomerTable('Takeaway');
+                            }}
+                            className={`py-2.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center space-x-1.5 ${
+                              customerOrderType === 'takeaway'
+                                ? 'bg-white text-rose-600 shadow-sm'
+                                : 'text-zinc-600 hover:text-zinc-900'
+                            }`}
+                          >
+                            <span>🥡</span>
+                            <span>Bawa Pulang</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {customerOrderType === 'dine-in' && (
+                        <div>
+                          <div className="flex justify-between items-center mb-1.5">
+                            <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider block">
+                              Pilih / Ketik Nomor Meja
+                            </label>
+                            <span className="text-[10px] text-zinc-400">Tersedia {tables.length} meja</span>
+                          </div>
+
+                          <div className="flex gap-2 mb-2">
+                            <input
+                              type="text"
+                              placeholder="Nomor meja (cth: 1, 2, VIP)"
+                              required={customerOrderType === 'dine-in'}
+                              value={customerTable}
+                              onChange={(e) => setCustomerTable(e.target.value)}
+                              className="flex-1 px-3.5 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl font-bold text-sm focus:border-rose-500 outline-none uppercase text-center"
+                            />
+                          </div>
+
+                          {/* Quick table chips */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {tables.slice(0, 6).map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => setCustomerTable(t.name.replace(/\D/g, '') || t.name)}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                                  customerTable === (t.name.replace(/\D/g, '') || t.name)
+                                    ? 'bg-rose-600 text-white'
+                                    : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-700'
+                                }`}
+                              >
+                                {t.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-rose-600/30 transition-all text-xs sm:text-sm flex items-center justify-center space-x-2"
+                      >
+                        <span>Buka Buku Menu & Pesan</span>
+                        <span>➔</span>
+                      </button>
+                    </form>
+
+                    <div className="mt-4 pt-3 border-t border-zinc-100 flex items-center justify-between text-[11px] text-zinc-500">
+                      <span>Sudah punya ID pesanan?</span>
+                      <button
+                        onClick={() => setShowCheckStatusModal(true)}
+                        className="text-rose-600 font-bold hover:underline"
+                      >
+                        Cek Status Realtime
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </section>
+
+          {/* Featured Menu Section (Menu Populer) */}
+          <section id="menu-populer" className="py-12 sm:py-16 bg-white border-b border-zinc-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-3 mb-8">
+                <div>
+                  <span className="text-rose-600 font-bold text-xs uppercase tracking-wider block mb-1">
+                    Favorit Pelanggan
+                  </span>
+                  <h2 className="text-2xl sm:text-3xl font-black text-zinc-950">
+                    Menu Rekomendasi Hari Ini
+                  </h2>
+                </div>
+                <button
+                  onClick={() => startOrdering('dine-in')}
+                  className="text-rose-600 font-bold text-xs sm:text-sm hover:underline flex items-center space-x-1"
+                >
+                  <span>Lihat Semua ({menuItems.length} Pilihan Menu)</span>
+                  <span>➔</span>
+                </button>
+              </div>
+
+              {/* Menu Cards Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
+                {menuItems.slice(0, 8).map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-xs hover:shadow-md hover:border-rose-400 transition-all flex flex-col group"
+                  >
+                    <div className="aspect-square bg-zinc-100 overflow-hidden relative">
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        onError={(e) => { (e.target as HTMLImageElement).src = getFallbackImage(item.name); }}
+                      />
+                      <span className="absolute top-2 left-2 bg-white/90 backdrop-blur-xs text-[10px] font-bold text-zinc-800 px-2 py-0.5 rounded-md shadow-xs">
+                        {item.category}
+                      </span>
+                    </div>
+
+                    <div className="p-3 sm:p-4 flex-1 flex flex-col">
+                      <h4 className="font-bold text-xs sm:text-sm text-zinc-900 line-clamp-1 mb-1">
+                        {item.name}
+                      </h4>
+                      <p className="text-[11px] text-zinc-500 line-clamp-2 mb-3">
+                        {item.description}
+                      </p>
+
+                      <div className="mt-auto pt-2 border-t border-zinc-100 flex items-center justify-between">
+                        <span className="font-black text-rose-600 text-xs sm:text-sm">
+                          Rp {item.price.toLocaleString('id-ID')}
+                        </span>
+                        <button
+                          onClick={() => {
+                            addToCustomerCart(item);
+                            startOrdering('dine-in');
+                          }}
+                          className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white rounded-lg text-xs font-bold transition-colors"
+                        >
+                          + Pesan
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-center mt-8">
+                <button
+                  onClick={() => startOrdering('dine-in')}
+                  className="px-6 py-3 bg-zinc-900 hover:bg-rose-600 text-white font-bold rounded-xl text-xs sm:text-sm shadow-md transition-colors inline-flex items-center space-x-2"
+                >
+                  <span>Buka Katalog Menu Lengkap ({menuItems.length} Menu)</span>
+                  <span>➔</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* How It Works (Cara Pesan) */}
+          <section id="cara-pesan" className="py-12 sm:py-16 bg-zinc-50 border-b border-zinc-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+              <span className="text-rose-600 font-bold text-xs uppercase tracking-wider block mb-1">
+                Mudah & Praktis
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-black text-zinc-950 mb-3">
+                Cara Memesan di {settings.restoName}
+              </h2>
+              <p className="text-zinc-600 text-xs sm:text-sm max-w-xl mx-auto mb-10">
+                Pesan hidangan favorit langsung dari genggaman ponsel Anda hanya dalam 3 langkah mudah.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+                <div className="bg-white p-6 rounded-3xl border border-zinc-200 shadow-xs relative">
+                  <span className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 font-black text-base flex items-center justify-center mb-4">
+                    1
+                  </span>
+                  <h3 className="font-bold text-sm sm:text-base text-zinc-900 mb-1.5">
+                    Pilih Nomor Meja / Scan QR
+                  </h3>
+                  <p className="text-xs text-zinc-500 leading-relaxed">
+                    Duduk di meja yang Anda sukai, lalu scan kode QR di meja atau tentukan nomor meja Anda secara langsung.
+                  </p>
+                </div>
+
+                <div className="bg-white p-6 rounded-3xl border border-zinc-200 shadow-xs relative">
+                  <span className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 font-black text-base flex items-center justify-center mb-4">
+                    2
+                  </span>
+                  <h3 className="font-bold text-sm sm:text-base text-zinc-900 mb-1.5">
+                    Pilih Menu & Atur Catatan
+                  </h3>
+                  <p className="text-xs text-zinc-500 leading-relaxed">
+                    Pilih makanan dan minuman favorit Anda, tambahkan catatan khusus (cth: tidak pedas, tanpa bawang).
+                  </p>
+                </div>
+
+                <div className="bg-white p-6 rounded-3xl border border-zinc-200 shadow-xs relative">
+                  <span className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 font-black text-base flex items-center justify-center mb-4">
+                    3
+                  </span>
+                  <h3 className="font-bold text-sm sm:text-base text-zinc-900 mb-1.5">
+                    Bayar & Pantau Realtime
+                  </h3>
+                  <p className="text-xs text-zinc-500 leading-relaxed">
+                    Pilih bayar via QRIS atau tunai di kasir. Pantau proses memasak di layar HP hingga pesanan siap saji.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Store Advantages (Keunggulan Toko) */}
+          <section id="keunggulan" className="py-12 sm:py-16 bg-white border-b border-zinc-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="text-center mb-10">
+                <span className="text-rose-600 font-bold text-xs uppercase tracking-wider block mb-1">
+                  Komitmen Kami
+                </span>
+                <h2 className="text-2xl sm:text-3xl font-black text-zinc-950 mb-2">
+                  Kenapa Pelanggan Memilih Kami?
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-5 rounded-2xl bg-zinc-50 border border-zinc-200">
+                  <span className="text-2xl">🌱</span>
+                  <h4 className="font-bold text-xs sm:text-sm text-zinc-900 mt-2 mb-1">Bahan Baku Pilihan</h4>
+                  <p className="text-[11px] text-zinc-500">Daging dan rempah segar dipasok setiap pagi demi menjaga kualitas rasa autentik.</p>
+                </div>
+                <div className="p-5 rounded-2xl bg-zinc-50 border border-zinc-200">
+                  <span className="text-2xl">⚡</span>
+                  <h4 className="font-bold text-xs sm:text-sm text-zinc-900 mt-2 mb-1">Penyajian Cepat</h4>
+                  <p className="text-[11px] text-zinc-500">Pesanan dari HP langsung terkirim ke dapur secara realtime untuk langsung diproses.</p>
+                </div>
+                <div className="p-5 rounded-2xl bg-zinc-50 border border-zinc-200">
+                  <span className="text-2xl">📢</span>
+                  <h4 className="font-bold text-xs sm:text-sm text-zinc-900 mt-2 mb-1">Panggilan Suara</h4>
+                  <p className="text-[11px] text-zinc-500">Notifikasi lonceng & suara ramah saat hidangan Anda telah siap disajikan.</p>
+                </div>
+                <div className="p-5 rounded-2xl bg-zinc-50 border border-zinc-200">
+                  <span className="text-2xl">🧾</span>
+                  <h4 className="font-bold text-xs sm:text-sm text-zinc-900 mt-2 mb-1">Struk Digital & Cetak</h4>
+                  <p className="text-[11px] text-zinc-500">Simpan struk pembayaran sebagai bukti transaksi resmi atau unduh langsung di HP.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Store Info, Location & Contact */}
+          <section id="lokasi" className="py-12 sm:py-16 bg-zinc-900 text-white">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                <div className="lg:col-span-7 space-y-4">
+                  <span className="text-rose-400 font-bold text-xs uppercase tracking-wider block">
+                    Kunjungi Restoran Kami
+                  </span>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white">
+                    {settings.restoName}
+                  </h2>
+                  <p className="text-zinc-300 text-xs sm:text-sm max-w-xl leading-relaxed">
+                    Suasana nyaman, hidangan higienis, dan pelayanan ramah menanti Anda dan keluarga.
+                  </p>
+
+                  <div className="space-y-3 pt-2 text-xs">
+                    <div className="flex items-start space-x-3">
+                      <span className="text-base text-rose-400">📍</span>
+                      <div>
+                        <p className="font-bold text-white">Alamat Restoran</p>
+                        <p className="text-zinc-400">{settings.restoAddress || 'Jl. Sudirman No. 45, Jakarta'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start space-x-3">
+                      <span className="text-base text-rose-400">📞</span>
+                      <div>
+                        <p className="font-bold text-white">Telepon / Reservasi</p>
+                        <p className="text-zinc-400">{settings.restoPhone || '0812-3456-7890'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start space-x-3">
+                      <span className="text-base text-rose-400">🕒</span>
+                      <div>
+                        <p className="font-bold text-white">Jam Operasional</p>
+                        <p className="text-zinc-400">Senin - Minggu: 10:00 - 22:00 WIB</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Call-To-Action Card */}
+                <div className="lg:col-span-5 bg-zinc-800 p-6 sm:p-7 rounded-3xl border border-zinc-700 text-center space-y-4">
+                  <div className="w-14 h-14 bg-rose-600/20 text-rose-500 rounded-2xl flex items-center justify-center mx-auto text-2xl">
+                    🍲
+                  </div>
+                  <h3 className="font-bold text-base text-white">Sudah Berada di Restoran?</h3>
+                  <p className="text-xs text-zinc-400">
+                    Buka menu sekarang dan nikmati sajian hangat favorit Anda tanpa perlu antre di meja kasir.
+                  </p>
+                  <button
+                    onClick={() => startOrdering('dine-in')}
+                    className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-rose-600/30 transition-all text-xs sm:text-sm"
+                  >
+                    Buka Menu & Mulai Pesan
+                  </button>
+                  <button
+                    onClick={() => setShowCheckStatusModal(true)}
+                    className="w-full bg-zinc-700 hover:bg-zinc-600 text-zinc-200 font-bold py-2.5 rounded-xl text-xs transition-colors"
+                  >
+                    Cek Status Pesanan Saya
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Footer */}
+          <footer className="bg-zinc-950 text-zinc-500 py-6 text-xs border-t border-zinc-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center space-x-2">
+                <span className="font-bold text-zinc-300">{settings.restoName}</span>
+                <span>•</span>
+                <span>Resto QR Pro Cloud POS</span>
+              </div>
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setShowCheckStatusModal(true)}
+                  className="hover:text-zinc-300 transition-colors"
+                >
+                  Cek Pesanan
+                </button>
+                <button
+                  onClick={() => setView('admin_login')}
+                  className="hover:text-rose-400 transition-colors font-semibold"
+                >
+                  🔐 Login Kasir / Admin
+                </button>
+              </div>
+            </div>
+          </footer>
         </div>
       )}
 
@@ -1362,100 +1994,74 @@ export default function App() {
         </div>
       )}
 
-      {/* CUSTOMER VIEW */}
+      {/* CUSTOMER VIEW - SELALU TETAP DI HALAMAN MENU */}
       {view === 'customer' && (
-        activeOrder ? (
-          <div className="min-h-screen flex flex-col items-center justify-center p-4">
-            <div className="w-full max-w-md bg-white rounded-3xl shadow-xl p-6 sm:p-8 text-center border border-zinc-200">
-              {(() => {
-                const live = orders.find((o) => o.id === activeOrder.id) || activeOrder;
-                const status = live.status;
-                return (
-                  <>
-                    <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-white shadow-md ${
-                      status === 'completed' ? 'bg-emerald-100 text-emerald-600' :
-                      status === 'processing' ? 'bg-blue-100 text-blue-600 animate-pulse' : 'bg-amber-100 text-amber-600'
-                    }`}>
-                      {status === 'completed' ? (
-                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                      ) : status === 'processing' ? (
-                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      ) : (
-                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                      )}
-                    </div>
-
-                    <h2 className="text-xl font-bold text-zinc-900 mb-1">
-                      {status === 'completed' ? 'Pesanan Selesai / Siap Diambil!' :
-                       status === 'processing' ? 'Sedang Dimasak di Dapur' : 'Menunggu Konfirmasi Kasir'}
-                    </h2>
-                    <p className="text-zinc-500 text-xs mb-4">
-                      {live.orderType === 'takeaway' ? 'Tipe: Bawa Pulang' : `Meja: ${live.table}`} • Realtime Firestore
-                    </p>
-
-                    <div className="bg-zinc-50 rounded-2xl p-4 text-left border border-zinc-200 mb-4">
-                      <div className="flex justify-between items-center mb-2.5">
-                        <span className="text-xs text-zinc-500">ID Pesanan:</span>
-                        <div className="flex items-center space-x-1.5">
-                          <span className="font-mono font-bold text-zinc-900">{live.id}</span>
-                          <button
-                            onClick={async () => {
-                              const ok = await copyToClipboardText(live.id);
-                              if (ok) showAlert('Berhasil', 'ID Pesanan disalin!');
-                            }}
-                            className="text-[10px] bg-white border border-zinc-200 px-2 py-0.5 rounded font-bold hover:bg-zinc-100"
-                          >
-                            Salin
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5 border-t border-zinc-200 pt-2.5">
-                        {live.items.map((it, idx) => (
-                          <div key={idx} className="flex justify-between text-xs">
-                            <span>{it.quantity}x {it.name}</span>
-                            <span className="font-semibold">Rp {(it.price * it.quantity).toLocaleString('id-ID')}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-3 pt-2.5 border-t border-zinc-200 flex justify-between font-bold text-sm">
-                        <span>Total:</span>
-                        <span className="text-rose-600">Rp {live.total.toLocaleString('id-ID')}</span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => setReceiptOrder(live)}
-                      className="w-full bg-rose-50 text-rose-700 font-bold py-2.5 rounded-xl mb-2 hover:bg-rose-100 text-xs transition-colors"
-                    >
-                      Lihat / Cetak Struk
-                    </button>
-                    <button
-                      onClick={() => {
-                        setActiveOrder(null);
-                        setView('landing');
-                      }}
-                      className="w-full bg-zinc-900 text-white font-bold py-2.5 rounded-xl text-xs hover:bg-zinc-800 transition-colors"
-                    >
-                      Selesai & Kembali
-                    </button>
-                  </>
-                );
-              })()}
+        <div className="min-h-screen pb-24">
+          <header className="bg-white px-4 py-3 shadow-sm sticky top-0 z-20 flex justify-between items-center border-b border-zinc-200">
+            <div>
+              <h1 className="text-base font-bold text-zinc-900">{settings.restoName}</h1>
+              <span className="text-[10px] text-rose-600 font-bold bg-rose-50 inline-block px-2 py-0.5 rounded-md mt-0.5">
+                {customerOrderType === 'takeaway' ? 'Takeaway' : `Meja: ${customerTable || '1'}`}
+              </span>
             </div>
-          </div>
-        ) : (
-          <div className="min-h-screen pb-24">
-            <header className="bg-white px-4 py-3 shadow-sm sticky top-0 z-20 flex justify-between items-center border-b border-zinc-200">
-              <div>
-                <h1 className="text-base font-bold text-zinc-900">{settings.restoName}</h1>
-                <span className="text-[10px] text-rose-600 font-bold bg-rose-50 inline-block px-2 py-0.5 rounded-md mt-0.5">
-                  {customerOrderType === 'takeaway' ? 'Takeaway' : `Meja: ${customerTable || '1'}`}
-                </span>
-              </div>
+            <div className="flex items-center space-x-2">
+              {activeOrder && (
+                <button
+                  onClick={() => setShowOrderTrackerModal(true)}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-2.5 py-1.5 rounded-xl flex items-center space-x-1 border border-rose-200 transition-colors"
+                >
+                  <span>📋</span>
+                  <span>Status Pesanan</span>
+                </button>
+              )}
               <button onClick={() => setView('landing')} className="text-zinc-500 hover:text-zinc-800 font-bold text-xs bg-zinc-100 px-3 py-1.5 rounded-xl">
                 Ganti Meja
               </button>
-            </header>
+            </div>
+          </header>
+
+          {/* Realtime Active Order Status Banner */}
+          {activeOrder && (() => {
+            const live = orders.find((o) => o.id === activeOrder.id) || activeOrder;
+            const status = live.status;
+            return (
+              <div className="mx-3 sm:mx-5 mt-3 bg-gradient-to-r from-rose-50 to-amber-50 border border-rose-200 rounded-2xl p-3 shadow-sm flex items-center justify-between gap-3">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <span className={`w-3 h-3 rounded-full flex-shrink-0 ${
+                    status === 'completed' ? 'bg-emerald-500' :
+                    status === 'processing' ? 'bg-blue-500 animate-pulse' : 'bg-amber-500'
+                  }`} />
+                  <div className="min-w-0">
+                    <p className="font-bold text-xs text-zinc-900 truncate">
+                      Pesanan <span className="font-mono text-rose-600 font-black">{live.id}</span>:{' '}
+                      <span className={status === 'completed' ? 'text-emerald-700' : status === 'processing' ? 'text-blue-700' : 'text-amber-800'}>
+                        {status === 'completed' ? 'Selesai / Siap Diambil!' :
+                         status === 'processing' ? 'Sedang Dimasak di Dapur' : 'Menunggu Konfirmasi Kasir'}
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-zinc-500">
+                      Total Rp {live.total.toLocaleString('id-ID')} • {live.items.length} Menu • Meja {live.table}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => setShowOrderTrackerModal(true)}
+                    className="px-2.5 py-1.5 bg-rose-600 text-white hover:bg-rose-700 rounded-xl text-xs font-bold transition-colors shadow-sm"
+                  >
+                    Detail / Struk
+                  </button>
+                  <button
+                    onClick={() => setActiveOrder(null)}
+                    className="p-1 text-zinc-400 hover:text-zinc-600 rounded-lg text-xs"
+                    title="Tutup banner"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
             {/* Category horizontal scroll */}
             <div className="bg-white px-3 py-2.5 shadow-sm border-b border-zinc-200 sticky top-[53px] z-10 flex space-x-2 overflow-x-auto">
@@ -1667,21 +2273,27 @@ export default function App() {
                   <div className="p-4 border-t border-zinc-100 bg-white">
                     <button
                       onClick={handleCustomerCheckout}
-                      disabled={!checkoutData.paymentMethod || !customerName.trim()}
-                      className={`w-full py-3.5 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm ${
-                        checkoutData.paymentMethod && customerName.trim()
+                      disabled={!checkoutData.paymentMethod || !customerName.trim() || isSubmittingOrder || customerCart.length === 0}
+                      className={`w-full py-3.5 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm flex items-center justify-center space-x-2 ${
+                        checkoutData.paymentMethod && customerName.trim() && !isSubmittingOrder && customerCart.length > 0
                           ? 'bg-rose-600 text-white hover:bg-rose-700'
                           : 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
                       }`}
                     >
-                      Kirim Pesanan ke Restoran (Rp {calculateTotal(customerCart).toLocaleString('id-ID')})
+                      {isSubmittingOrder ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block"></span>
+                          <span>Sedang Mengirim Pesanan...</span>
+                        </>
+                      ) : (
+                        <span>Kirim Pesanan ke Restoran (Rp {calculateTotal(customerCart).toLocaleString('id-ID')})</span>
+                      )}
                     </button>
                   </div>
                 </div>
               </div>
             )}
           </div>
-        )
       )}
 
       {/* ADMIN & POS VIEW */}
@@ -1943,14 +2555,21 @@ export default function App() {
 
                       <button
                         onClick={handlePosCheckout}
-                        disabled={posCart.length === 0 || !posPaymentMethod || !posCustomerName.trim()}
-                        className={`w-full py-2.5 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm ${
-                          posCart.length > 0 && posPaymentMethod && posCustomerName.trim()
+                        disabled={posCart.length === 0 || !posPaymentMethod || !posCustomerName.trim() || isSubmittingPos}
+                        className={`w-full py-2.5 rounded-xl font-bold transition-all shadow-md text-xs sm:text-sm flex items-center justify-center space-x-2 ${
+                          posCart.length > 0 && posPaymentMethod && posCustomerName.trim() && !isSubmittingPos
                             ? 'bg-rose-600 text-white hover:bg-rose-700'
                             : 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
                         }`}
                       >
-                        Bayar & Cetak Struk (Firebase Sync)
+                        {isSubmittingPos ? (
+                          <>
+                            <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block"></span>
+                            <span>Menyimpan Transaksi...</span>
+                          </>
+                        ) : (
+                          <span>Bayar & Cetak Struk (Firebase Sync)</span>
+                        )}
                       </button>
                     </div>
                   </div>
