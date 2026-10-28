@@ -12,7 +12,7 @@ export const DEFAULT_SETTINGS: Settings = {
   restoPhone: "0812-3456-7890",
   soundEnabled: true,
   voiceType: "female",
-  callTemplate: "Pesanan atas nama {nama}, dengan nomor {id}, sudah selesai dan siap diambil.",
+  callTemplate: "Pesanan atas nama {nama}, meja {meja}, dengan nomor {id}, sudah selesai dan siap diambil.",
   receiptHeaderNote: "Struk Pembayaran Resmi",
   receiptFooterNote: "Terima Kasih Atas Kunjungan Anda!",
   receiptShowAddress: true,
@@ -91,7 +91,14 @@ export const playOrderCallSound = () => {
 
 let currentAudioPlayer: HTMLAudioElement | null = null;
 
-export const announceOrderCall = (customerName: string, orderId: string, soundEnabled = true, voiceType: 'female' | 'male' = 'female', template = '') => {
+export const announceOrderCall = (
+  customerName: string,
+  orderId: string,
+  soundEnabled = true,
+  voiceType: 'female' | 'male' = 'female',
+  template = '',
+  tableName = ''
+) => {
   if (currentAudioPlayer) {
     currentAudioPlayer.pause();
     currentAudioPlayer.currentTime = 0;
@@ -101,13 +108,17 @@ export const announceOrderCall = (customerName: string, orderId: string, soundEn
     window.speechSynthesis.cancel();
   }
 
-  const textTemplate = template || "Pesanan atas nama {nama}, dengan nomor {id}, sudah selesai dan siap diambil.";
+  const textTemplate = template || "Pesanan atas nama {nama}, meja {meja}, dengan nomor {id}, sudah selesai dan siap diambil.";
   const cleanName = (customerName || 'Pelanggan').replace(/[^a-zA-Z0-9\s]/g, '').trim();
   const cleanId = (orderId || '').replace(/[^a-zA-Z0-9-]/g, '').trim();
+  const cleanTable = (tableName || 'Meja').replace(/[^a-zA-Z0-9\s-]/g, '').trim();
 
   const speechText = textTemplate
     .replace(/{nama}/gi, cleanName)
-    .replace(/{id}/gi, cleanId);
+    .replace(/{id}/gi, cleanId)
+    .replace(/{meja}/gi, cleanTable)
+    .replace(/{nomor_meja}/gi, cleanTable)
+    .replace(/{table}/gi, cleanTable);
 
   if (soundEnabled) {
     playOrderCallSound();

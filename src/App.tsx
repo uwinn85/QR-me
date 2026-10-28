@@ -109,6 +109,8 @@ export default function App() {
   const [showMenuModal, setShowMenuModal] = useState(false);
   const [editingMenu, setEditingMenu] = useState<MenuItem | null>(null);
   const [menuForm, setMenuForm] = useState({ name: '', price: '', category: 'Makanan Utama', image: '', description: '' });
+  const [adminMenuSearch, setAdminMenuSearch] = useState('');
+  const [adminMenuCatFilter, setAdminMenuCatFilter] = useState('Semua');
 
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
@@ -1949,12 +1951,12 @@ export default function App() {
             </div>
             <h2 className="text-xl font-bold text-zinc-900 text-center mb-1">Login Staff Resto</h2>
             <p className="text-xs text-zinc-500 text-center mb-5">
-              Akun default: <b>admin</b> (PIN: 123456) atau <b>kasir1</b> (PIN: 111111)
+              Masukan User <b className="font-bold text-zinc-700">Kasir/Admin</b> dan <b className="font-bold text-zinc-700">PIN</b> yang anda miliki
             </p>
 
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               <div>
-                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1 block">Username</label>
+                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1 block">USER</label>
                 <input
                   type="text"
                   required
@@ -1965,7 +1967,7 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1 block">PIN (6 digit)</label>
+                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-1 block">PIN</label>
                 <input
                   type="password"
                   maxLength={6}
@@ -2675,7 +2677,8 @@ export default function App() {
                                                 order.id,
                                                 settings.soundEnabled,
                                                 settings.voiceType || 'female',
-                                                settings.callTemplate
+                                                settings.callTemplate,
+                                                order.table || 'Meja'
                                               );
                                             }}
                                             className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px] shadow-sm flex items-center space-x-1"
@@ -2705,118 +2708,279 @@ export default function App() {
               )}
 
               {/* MENU CATALOG TAB */}
-              {adminTab === 'menu' && (
-                <div className="space-y-4">
-                  {/* Category Management */}
-                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-200 space-y-3">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h3 className="font-bold text-sm text-zinc-900">Kategori Menu Restoran</h3>
-                        <p className="text-xs text-zinc-500">Kelompokkan hidangan agar mudah ditemukan pelanggan.</p>
-                      </div>
-                      <button
-                        onClick={() => setShowCategoryModal(true)}
-                        className="bg-zinc-900 hover:bg-zinc-800 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all"
-                      >
-                        + Tambah Kategori
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {categories.map((cat) => (
-                        <div
-                          key={cat.id}
-                          className="flex items-center space-x-1 px-3 py-1.5 bg-zinc-100 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-800"
+              {adminTab === 'menu' && (() => {
+                const filteredAdminMenu = menuItems.filter((item) => {
+                  const query = adminMenuSearch.toLowerCase().trim();
+                  const matchesSearch = !query ||
+                    item.name.toLowerCase().includes(query) ||
+                    (item.description && item.description.toLowerCase().includes(query));
+                  const matchesCat = adminMenuCatFilter === 'Semua' || item.category === adminMenuCatFilter;
+                  return matchesSearch && matchesCat;
+                });
+
+                return (
+                  <div className="space-y-4">
+                    {/* Category Management */}
+                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-200 space-y-3">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div>
+                          <h3 className="font-bold text-sm text-zinc-900">Kategori Menu Restoran</h3>
+                          <p className="text-xs text-zinc-500">Kelompokkan hidangan agar mudah ditemukan pelanggan dan kasir.</p>
+                        </div>
+                        <button
+                          onClick={() => setShowCategoryModal(true)}
+                          className="bg-zinc-900 hover:bg-zinc-800 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all flex items-center space-x-1"
                         >
-                          <span>{cat.name}</span>
-                          {cat.id !== 'Semua' && (
-                            <button onClick={() => handleDeleteCategory(cat.id)} className="text-red-500 hover:text-red-700 ml-1 font-bold">
-                              ×
+                          <span>+ Tambah Kategori</span>
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {categories.map((cat) => {
+                          const count = cat.id === 'Semua' ? menuItems.length : menuItems.filter((m) => m.category === cat.id).length;
+                          return (
+                            <div
+                              key={cat.id}
+                              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                                adminMenuCatFilter === cat.id
+                                  ? 'bg-rose-50 border-rose-300 text-rose-700'
+                                  : 'bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100'
+                              }`}
+                              onClick={() => setAdminMenuCatFilter(cat.id)}
+                            >
+                              <span>{cat.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/80 border border-zinc-200 text-zinc-500">
+                                {count}
+                              </span>
+                              {cat.id !== 'Semua' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteCategory(cat.id);
+                                  }}
+                                  className="text-red-500 hover:text-red-700 ml-1 font-bold px-1"
+                                  title="Hapus Kategori"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Menu List Header & Controls */}
+                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-200 space-y-3">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <h3 className="font-bold text-sm text-zinc-900">Katalog Menu</h3>
+                            <span className="bg-zinc-100 text-zinc-700 font-bold text-xs px-2.5 py-0.5 rounded-full border border-zinc-200">
+                              {filteredAdminMenu.length} / {menuItems.length} Produk
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-500 mt-0.5">
+                            Data tersinkron otomatis ke cloud Firestore dan responsif di semua perangkat.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
+                          <button
+                            onClick={exportMenuToXLSX}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all flex items-center justify-center space-x-1"
+                          >
+                            <span>📥 Export</span>
+                          </button>
+                          <label className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all flex items-center justify-center space-x-1 cursor-pointer">
+                            <span>📤 Import</span>
+                            <input type="file" accept=".xlsx, .xls" onChange={importMenuFromXLSX} className="hidden" />
+                          </label>
+                          <button
+                            onClick={() => openMenuModal()}
+                            className="col-span-2 sm:col-span-1 bg-rose-600 hover:bg-rose-700 text-white font-bold px-3.5 py-2 rounded-xl shadow-md text-xs transition-all flex items-center justify-center space-x-1"
+                          >
+                            <span>+ Tambah Menu</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Search Bar & Quick Filter */}
+                      <div className="flex flex-col sm:flex-row gap-2 pt-1 border-t border-zinc-100">
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            placeholder="Cari menu berdasarkan nama atau deskripsi..."
+                            value={adminMenuSearch}
+                            onChange={(e) => setAdminMenuSearch(e.target.value)}
+                            className="w-full pl-8 pr-8 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-xs font-medium outline-none focus:border-rose-500 focus:bg-white transition-all"
+                          />
+                          <span className="absolute left-2.5 top-2.5 text-zinc-400 text-xs">🔍</span>
+                          {adminMenuSearch && (
+                            <button
+                              onClick={() => setAdminMenuSearch('')}
+                              className="absolute right-2.5 top-2 text-zinc-400 hover:text-zinc-600 text-xs font-bold"
+                            >
+                              ✕
                             </button>
                           )}
                         </div>
+                        <select
+                          value={adminMenuCatFilter}
+                          onChange={(e) => setAdminMenuCatFilter(e.target.value)}
+                          className="px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-xl text-xs font-bold text-zinc-700 outline-none focus:border-rose-500 sm:w-48"
+                        >
+                          {categories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Empty State */}
+                    {filteredAdminMenu.length === 0 && (
+                      <div className="bg-white rounded-2xl p-8 text-center border border-dashed border-zinc-300">
+                        <p className="text-3xl mb-2">🍽️</p>
+                        <h4 className="font-bold text-zinc-800 text-sm">Tidak ada menu yang ditemukan</h4>
+                        <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
+                          {adminMenuSearch || adminMenuCatFilter !== 'Semua'
+                            ? 'Coba ubah kata kunci pencarian atau ganti filter kategori di atas.'
+                            : 'Belum ada menu yang tersimpan. Klik tombol Tambah Menu untuk menambahkan hidangan.'}
+                        </p>
+                        <div className="mt-4 flex justify-center gap-2">
+                          {(adminMenuSearch || adminMenuCatFilter !== 'Semua') && (
+                            <button
+                              onClick={() => {
+                                setAdminMenuSearch('');
+                                setAdminMenuCatFilter('Semua');
+                              }}
+                              className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs font-bold rounded-xl"
+                            >
+                              Reset Filter
+                            </button>
+                          )}
+                          <button
+                            onClick={() => openMenuModal()}
+                            className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow"
+                          >
+                            + Tambah Menu Baru
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* MOBILE CARD VIEW: Visible on screens < 768px (Phones & small tablets) */}
+                    <div className="block md:hidden space-y-3">
+                      {filteredAdminMenu.map((item) => (
+                        <div
+                          key={item.id}
+                          className="bg-white p-3.5 rounded-2xl shadow-sm border border-zinc-200 flex flex-col gap-3"
+                        >
+                          <div className="flex gap-3 items-start">
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              className="w-20 h-20 rounded-xl object-cover border border-zinc-200 shrink-0 bg-zinc-100"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = getFallbackImage(item.name);
+                              }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-rose-50 text-rose-700 border border-rose-100">
+                                  {item.category}
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-zinc-900 leading-tight truncate">{item.name}</h4>
+                              <p className="text-xs text-rose-600 font-extrabold mt-1">
+                                Rp {item.price.toLocaleString('id-ID')}
+                              </p>
+                              {item.description && (
+                                <p className="text-[11px] text-zinc-500 line-clamp-2 mt-1 leading-snug">
+                                  {item.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 pt-2 border-t border-zinc-100">
+                            <button
+                              onClick={() => openMenuModal(item)}
+                              className="flex-1 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-bold flex items-center justify-center space-x-1 transition-colors"
+                            >
+                              <span>✏️ Edit</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteMenu(item.id)}
+                              className="flex-1 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs font-bold flex items-center justify-center space-x-1 transition-colors"
+                            >
+                              <span>🗑️ Hapus</span>
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
-                  </div>
 
-                  {/* Menu List Header */}
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-2xl shadow-sm border border-zinc-200 gap-3">
-                    <div>
-                      <h3 className="font-bold text-sm text-zinc-900">Katalog Menu ({menuItems.length} Produk)</h3>
-                      <p className="text-xs text-zinc-500">Disimpan realtime di cloud Firestore. Mendukung ekspor/impor Excel (.xlsx).</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                      <button
-                        onClick={exportMenuToXLSX}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all flex items-center space-x-1"
-                      >
-                        <span>📥 Export Excel</span>
-                      </button>
-                      <label className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all flex items-center space-x-1 cursor-pointer">
-                        <span>📤 Import Excel</span>
-                        <input type="file" accept=".xlsx, .xls" onChange={importMenuFromXLSX} className="hidden" />
-                      </label>
-                      <button
-                        onClick={() => openMenuModal()}
-                        className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-2 rounded-xl shadow-md text-xs transition-all flex items-center space-x-1"
-                      >
-                        <span>+ Tambah Menu</span>
-                      </button>
+                    {/* DESKTOP & TABLET TABLE VIEW: Visible on screens >= 768px (Laptops, Desktops, iPads) */}
+                    <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-zinc-200 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs sm:text-sm min-w-[650px]">
+                          <thead>
+                            <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
+                              <th className="p-3.5">Foto</th>
+                              <th className="p-3.5">Nama Menu</th>
+                              <th className="p-3.5">Kategori</th>
+                              <th className="p-3.5">Harga</th>
+                              <th className="p-3.5">Deskripsi</th>
+                              <th className="p-3.5 text-center">Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100">
+                            {filteredAdminMenu.map((item) => (
+                              <tr key={item.id} className="hover:bg-zinc-50/80 transition-colors">
+                                <td className="p-3.5">
+                                  <img
+                                    src={item.image}
+                                    alt={item.name}
+                                    className="w-12 h-12 rounded-xl object-cover border border-zinc-200 bg-zinc-100"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = getFallbackImage(item.name);
+                                    }}
+                                  />
+                                </td>
+                                <td className="p-3.5 font-bold text-zinc-900">{item.name}</td>
+                                <td className="p-3.5">
+                                  <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-zinc-100 text-zinc-700">
+                                    {item.category}
+                                  </span>
+                                </td>
+                                <td className="p-3.5 font-bold text-rose-600">
+                                  Rp {item.price.toLocaleString('id-ID')}
+                                </td>
+                                <td className="p-3.5 text-zinc-500 max-w-xs truncate">{item.description || '-'}</td>
+                                <td className="p-3.5 text-center space-x-2 whitespace-nowrap">
+                                  <button
+                                    onClick={() => openMenuModal(item)}
+                                    className="px-3 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-bold transition-colors"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteMenu(item.id)}
+                                    className="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition-colors"
+                                  >
+                                    Hapus
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Menu Table */}
-                  <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 overflow-hidden">
-                    <table className="w-full text-left border-collapse text-xs sm:text-sm">
-                      <thead>
-                        <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold text-zinc-500 uppercase">
-                          <th className="p-3.5">Foto</th>
-                          <th className="p-3.5">Nama Menu</th>
-                          <th className="p-3.5">Kategori</th>
-                          <th className="p-3.5">Harga</th>
-                          <th className="p-3.5">Deskripsi</th>
-                          <th className="p-3.5 text-center">Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100">
-                        {menuItems.map((item) => (
-                          <tr key={item.id} className="hover:bg-zinc-50 transition-colors">
-                            <td className="p-3.5">
-                              <img
-                                src={item.image}
-                                alt={item.name}
-                                className="w-12 h-12 rounded-xl object-cover border border-zinc-200"
-                                onError={(e) => { (e.target as HTMLImageElement).src = getFallbackImage(item.name); }}
-                              />
-                            </td>
-                            <td className="p-3.5 font-bold text-zinc-900">{item.name}</td>
-                            <td className="p-3.5">
-                              <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-zinc-100 text-zinc-700">
-                                {item.category}
-                              </span>
-                            </td>
-                            <td className="p-3.5 font-bold text-rose-600">Rp {item.price.toLocaleString('id-ID')}</td>
-                            <td className="p-3.5 text-zinc-500 max-w-xs truncate">{item.description || '-'}</td>
-                            <td className="p-3.5 text-center space-x-2">
-                              <button
-                                onClick={() => openMenuModal(item)}
-                                className="px-3 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-bold"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleDeleteMenu(item.id)}
-                                className="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold"
-                              >
-                                Hapus
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* TABLES TAB */}
               {adminTab === 'tables' && (
@@ -2853,7 +3017,7 @@ export default function App() {
                                 onClick={() => downloadTableQrPng(tbl)}
                                 className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold transition-colors"
                               >
-                                🖼️ Unduh Stand QR Meja
+                                Unduh
                               </button>
                               {tables.length > 1 && (
                                 <button
@@ -3068,6 +3232,61 @@ export default function App() {
                           className="w-5 h-5 accent-rose-600 rounded cursor-pointer"
                         />
                       </div>
+
+                      {/* Pengaturan Kalimat Ucapan Notifikasi */}
+                      <div className="sm:col-span-2 bg-rose-50/70 p-4 rounded-2xl border border-rose-200 space-y-2.5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <label className="text-xs font-bold text-rose-950 uppercase tracking-wider block">
+                              Pengaturan Kalimat Ucapan Notifikasi
+                            </label>
+                            <p className="text-[11px] text-zinc-600">
+                              Format kalimat yang diucapkan sistem suara saat pesanan pelanggan selesai.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              announceOrderCall(
+                                'Budi',
+                                'ORD-1001',
+                                settings.soundEnabled,
+                                settings.voiceType || 'female',
+                                settings.callTemplate,
+                                'Meja 05'
+                              );
+                            }}
+                            className="self-start sm:self-auto px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5 flex-shrink-0"
+                          >
+                            <span>🔊</span>
+                            <span>Tes Suara Notifikasi</span>
+                          </button>
+                        </div>
+
+                        <textarea
+                          rows={2}
+                          value={settings.callTemplate}
+                          onChange={(e) => setSettings({ ...settings, callTemplate: e.target.value })}
+                          placeholder="Pesanan atas nama {nama}, meja {meja}, dengan nomor {id}, sudah selesai dan siap diambil."
+                          className="w-full px-3.5 py-2.5 bg-white border border-rose-200 rounded-xl text-xs font-medium text-zinc-900 outline-none focus:border-rose-500 shadow-xs"
+                        />
+                        
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-600">
+                          <p>
+                            Gunakan kode: <span className="font-mono font-bold text-rose-700 bg-white px-1.5 py-0.5 rounded border border-rose-200">{'{nama}'}</span> = Nama Pelanggan, <span className="font-mono font-bold text-rose-700 bg-white px-1.5 py-0.5 rounded border border-rose-200">{'{meja}'}</span> = Nomor Meja, <span className="font-mono font-bold text-rose-700 bg-white px-1.5 py-0.5 rounded border border-rose-200">{'{id}'}</span> = Nomor Pesanan.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setSettings({
+                              ...settings,
+                              callTemplate: "Pesanan atas nama {nama}, meja {meja}, dengan nomor {id}, sudah selesai dan siap diambil."
+                            })}
+                            className="text-rose-600 font-bold hover:underline"
+                          >
+                            Reset ke Default
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -3122,8 +3341,8 @@ export default function App() {
 
       {/* MODAL: Menu Add/Edit */}
       {showMenuModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md rounded-2xl p-5 shadow-2xl">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md max-h-[92vh] overflow-y-auto rounded-2xl p-5 sm:p-6 shadow-2xl">
             <h3 className="text-base font-bold text-zinc-900 mb-4">{editingMenu ? 'Edit Menu' : 'Tambah Menu Baru'}</h3>
             <form onSubmit={handleSaveMenu} className="space-y-3.5">
               <div>
