@@ -70,7 +70,7 @@ export interface Order {
   total: number;
   paymentMethod: string;
   notes?: string;
-  status: 'unverified' | 'pending' | 'processing' | 'completed';
+  status: 'unverified' | 'pending' | 'processing' | 'completed' | 'cancelled';
   time: string;
   source: string;
   cashGiven?: number;

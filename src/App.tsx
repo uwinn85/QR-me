@@ -6,6 +6,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  Cell
+} from 'recharts';
+import {
   Settings,
   MenuItem,
   Category,
@@ -41,6 +54,7 @@ import {
   subscribeOrders,
   createOrder,
   updateOrderStatus,
+  deleteOrder,
   saveSettings as persistSettings,
   saveMenuItem,
   deleteMenuItem,
@@ -63,8 +77,10 @@ export default function App() {
 
   // Active view: 'landing' | 'customer' | 'admin_login' | 'admin'
   const [view, setView] = useState<'landing' | 'customer' | 'admin_login' | 'admin'>('landing');
-  const [adminTab, setAdminTab] = useState<'pos' | 'orders' | 'menu' | 'tables' | 'staff' | 'settings'>('pos');
+  const [adminTab, setAdminTab] = useState<'pos' | 'orders' | 'analytics' | 'menu' | 'tables' | 'staff' | 'settings'>('pos');
   const [currentUser, setCurrentUser] = useState<StaffUser | null>(null);
+  const [analyticsDays, setAnalyticsDays] = useState<number>(7);
+  const [orderFilterStatus, setOrderFilterStatus] = useState<string>('all');
 
   // Firestore Realtime Data
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -496,7 +512,103 @@ export default function App() {
     setShowMenuModal(true);
   };
 
-  // Excel Export & Import
+  // Order Operations: Cancel, Delete & XLSX Export (Batal & Hapus Khusus Admin)
+  const handleCancelOrder = (orderId: string) => {
+    if (currentUser?.role !== 'admin') {
+      showAlert('Akses Terbatas', 'Hanya pengguna dengan peran Administrator yang memiliki wewenang untuk membatalkan pesanan.');
+      return;
+    }
+    showAlert(
+      'Batalkan Pesanan',
+      `Apakah Anda yakin ingin membatalkan pesanan #${orderId}? Status pesanan akan diubah menjadi 'Dibatalkan'.`,
+      async () => {
+        try {
+          await updateOrderStatus(orderId, 'cancelled');
+        } catch (err) {
+          showAlert('Gagal', 'Terjadi kesalahan saat membatalkan pesanan.');
+        }
+      }
+    );
+  };
+
+  const handleDeleteOrder = (orderId: string) => {
+    if (currentUser?.role !== 'admin') {
+      showAlert('Akses Terbatas', 'Hanya pengguna dengan peran Administrator yang memiliki wewenang untuk menghapus transaksi secara permanen.');
+      return;
+    }
+    showAlert(
+      'Hapus Transaksi Permanen',
+      `PERINGATAN: Transaksi #${orderId} akan dihapus secara permanen dari database Firebase Firestore. Data yang dihapus tidak dapat dipulihkan. Lanjutkan?`,
+      async () => {
+        try {
+          await deleteOrder(orderId);
+        } catch (err) {
+          showAlert('Gagal', 'Terjadi kesalahan saat menghapus transaksi.');
+        }
+      }
+    );
+  };
+
+  const exportOrdersToXLSX = () => {
+    if (orders.length === 0) {
+      showAlert('Informasi', 'Belum ada transaksi untuk diekspor ke file Excel.');
+      return;
+    }
+
+    const dataToExport = orders.map((o) => {
+      const itemsDetail = o.items.map((i) => `${i.quantity}x ${i.name} (@Rp ${i.price.toLocaleString('id-ID')})`).join('; ');
+      const paymentName = paymentMethods.find((p) => p.id === o.paymentMethod)?.name || o.paymentMethod;
+      const statusMap: Record<string, string> = {
+        unverified: 'Menunggu Verifikasi',
+        processing: 'Sedang Disiapkan / Dimasak',
+        completed: 'Selesai',
+        cancelled: 'Dibatalkan'
+      };
+
+      return {
+        'No Pesanan': o.id,
+        'Waktu Transaksi': new Date(o.time).toLocaleString('id-ID'),
+        'Nama Pelanggan': o.customerName || 'Pelanggan',
+        'Meja': o.table || '-',
+        'Tipe Pesanan': o.orderType === 'takeaway' ? 'Bungkus (Takeaway)' : 'Makan di Tempat (Dine-in)',
+        'Menu Dipesan': itemsDetail,
+        'Total Item': o.items.reduce((sum, item) => sum + item.quantity, 0),
+        'Subtotal (Rp)': o.subtotal,
+        'Pajak (Rp)': o.tax,
+        'Service (Rp)': o.service,
+        'Total Tagihan (Rp)': o.total,
+        'Metode Pembayaran': paymentName,
+        'Status Pesanan': statusMap[o.status] || o.status,
+        'Sumber Pesanan': o.source || 'POS / QR Pelanggan',
+        'Catatan Pelanggan': o.notes || '-'
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    worksheet['!cols'] = [
+      { wch: 15 }, // No Pesanan
+      { wch: 20 }, // Waktu Transaksi
+      { wch: 20 }, // Nama Pelanggan
+      { wch: 10 }, // Meja
+      { wch: 24 }, // Tipe Pesanan
+      { wch: 42 }, // Menu Dipesan
+      { wch: 12 }, // Total Item
+      { wch: 15 }, // Subtotal
+      { wch: 12 }, // Pajak
+      { wch: 12 }, // Service
+      { wch: 18 }, // Total Tagihan
+      { wch: 20 }, // Metode Pembayaran
+      { wch: 26 }, // Status Pesanan
+      { wch: 22 }, // Sumber Pesanan
+      { wch: 28 }, // Catatan Pelanggan
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Daftar Transaksi');
+    XLSX.writeFile(workbook, `Laporan-Transaksi-${(settings.restoName || 'Resto').replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // Excel Export & Import Menu
   const exportMenuToXLSX = () => {
     const dataToExport = menuItems.map((m) => ({
       ID: m.id,
@@ -2317,6 +2429,7 @@ export default function App() {
               {[
                 { id: 'pos', name: 'Kasir (POS)', icon: '🛒', adminOnly: false },
                 { id: 'orders', name: 'Pesanan Masuk', icon: '📋', adminOnly: false },
+                { id: 'analytics', name: 'Analitik', icon: '📊', adminOnly: false },
                 { id: 'menu', name: 'Katalog Menu', icon: '🍽️', adminOnly: true },
                 { id: 'tables', name: 'QR Meja', icon: '📱', adminOnly: true },
                 { id: 'staff', name: 'Manajemen Staff', icon: '👥', adminOnly: true },
@@ -2372,6 +2485,7 @@ export default function App() {
                 <h2 className="text-base font-bold text-zinc-900 capitalize">
                   {adminTab === 'pos' ? 'Mesin Kasir (POS)' :
                    adminTab === 'orders' ? 'Pesanan Masuk & Verifikasi Dapur' :
+                   adminTab === 'analytics' ? 'Analitik Penjualan & Grafik Performa' :
                    adminTab === 'menu' ? 'Katalog Menu & Impor Excel' :
                    adminTab === 'tables' ? 'Manajemen QR Meja Pelanggan' :
                    adminTab === 'staff' ? 'Manajemen Staff & Akses PIN' : 'Pengaturan Resto & Struk'}
@@ -2579,133 +2693,682 @@ export default function App() {
               )}
 
               {/* ORDERS TAB */}
-              {adminTab === 'orders' && (
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-zinc-200">
-                    <div>
-                      <h3 className="font-bold text-sm text-zinc-900">Pesanan Masuk Realtime</h3>
-                      <p className="text-xs text-zinc-500">
-                        Sinkron langsung dari QR pelanggan & kasir POS via Firebase Firestore.
-                      </p>
-                    </div>
-                    <span className="text-xs font-bold px-3 py-1 bg-rose-50 text-rose-600 rounded-full border border-rose-200">
-                      Total: {orders.length} Pesanan
-                    </span>
-                  </div>
+              {adminTab === 'orders' && (() => {
+                const isAdmin = currentUser?.role === 'admin';
 
-                  {[
-                    { key: 'unverified', title: '🔴 Menunggu Verifikasi Kasir (Scan QR Pelanggan)', badgeBg: 'bg-amber-100 text-amber-800' },
-                    { key: 'processing', title: '🔵 Sedang Disiapkan / Dimasak di Dapur', badgeBg: 'bg-blue-100 text-blue-800' },
-                    { key: 'completed', title: '🟢 Selesai / Siap Diambil', badgeBg: 'bg-emerald-100 text-emerald-800' }
-                  ].map((grp) => {
-                    const list = orders.filter((o) => o.status === grp.key);
-                    if (list.length === 0) return null;
-                    return (
-                      <div key={grp.key} className="bg-white rounded-2xl border border-zinc-200 shadow-sm overflow-hidden">
-                        <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex justify-between items-center">
-                          <h4 className="font-bold text-xs sm:text-sm text-zinc-900">{grp.title}</h4>
-                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${grp.badgeBg}`}>{list.length}</span>
+                return (
+                  <div className="space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl shadow-sm border border-zinc-200">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h3 className="font-bold text-sm text-zinc-900">Pesanan Masuk & Transaksi Realtime</h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-full">
+                            {orders.length} Total
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          {isAdmin
+                            ? 'Administrator: Kelola verifikasi dapur, pembatalan pesanan, hapus transaksi, atau unduh laporan Excel.'
+                            : 'Kasir Shift: Verifikasi pesanan dapur dan selesaikan transaksi kasir. Pembatalan & hapus transaksi hanya dapat dilakukan oleh Admin.'}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                        <button
+                          onClick={exportOrdersToXLSX}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition-all flex items-center justify-center space-x-1.5 shadow-sm"
+                          title="Ekspor seluruh daftar transaksi ke format Excel (.xlsx)"
+                        >
+                          <span>📥</span>
+                          <span>Export XLSX</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Status Filters */}
+                    <div className="flex space-x-1.5 overflow-x-auto pb-1">
+                      {[
+                        { id: 'all', label: 'Semua Status', count: orders.length },
+                        { id: 'unverified', label: '🔴 Menunggu Verifikasi', count: orders.filter((o) => o.status === 'unverified').length },
+                        { id: 'processing', label: '🔵 Sedang Dimasak', count: orders.filter((o) => o.status === 'processing').length },
+                        { id: 'completed', label: '🟢 Selesai', count: orders.filter((o) => o.status === 'completed').length },
+                        { id: 'cancelled', label: '⛔ Dibatalkan', count: orders.filter((o) => o.status === 'cancelled').length }
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          onClick={() => setOrderFilterStatus(tab.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 ${
+                            orderFilterStatus === tab.id
+                              ? 'bg-zinc-900 text-white shadow-sm'
+                              : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-100'
+                          }`}
+                        >
+                          <span>{tab.label}</span>
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${orderFilterStatus === tab.id ? 'bg-white/20 text-white' : 'bg-zinc-100 text-zinc-600'}`}>
+                            {tab.count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Grouped Orders Table */}
+                    {[
+                      { key: 'unverified', title: '🔴 Menunggu Verifikasi Kasir (Scan QR Pelanggan)', badgeBg: 'bg-amber-100 text-amber-800' },
+                      { key: 'processing', title: '🔵 Sedang Disiapkan / Dimasak di Dapur', badgeBg: 'bg-blue-100 text-blue-800' },
+                      { key: 'completed', title: '🟢 Selesai / Siap Diambil', badgeBg: 'bg-emerald-100 text-emerald-800' },
+                      { key: 'cancelled', title: '⛔ Pesanan Dibatalkan', badgeBg: 'bg-red-100 text-red-800' }
+                    ]
+                      .filter((grp) => orderFilterStatus === 'all' || orderFilterStatus === grp.key)
+                      .map((grp) => {
+                        const list = orders.filter((o) => o.status === grp.key);
+                        if (list.length === 0) return null;
+                        return (
+                          <div key={grp.key} className="bg-white rounded-2xl border border-zinc-200 shadow-sm overflow-hidden">
+                            <div className="p-3.5 bg-zinc-50 border-b border-zinc-200 flex justify-between items-center">
+                              <h4 className="font-bold text-xs sm:text-sm text-zinc-900">{grp.title}</h4>
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${grp.badgeBg}`}>{list.length}</span>
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse text-xs min-w-[700px]">
+                                <thead>
+                                  <tr className="border-b border-zinc-200 text-[11px] font-bold text-zinc-500 uppercase bg-zinc-50/50">
+                                    <th className="p-3">ID & Waktu</th>
+                                    <th className="p-3">Pemesan & Meja</th>
+                                    <th className="p-3">Detail Menu</th>
+                                    <th className="p-3">Total & Bayar</th>
+                                    <th className="p-3 text-center">Aksi {isAdmin ? '& Kelola Transaksi' : 'Status'}</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-zinc-100">
+                                  {list.map((order) => (
+                                    <tr key={order.id} className="hover:bg-zinc-50 transition-colors">
+                                      <td className="p-3">
+                                        <span className="font-mono font-bold text-zinc-900 block">{order.id}</span>
+                                        <span className="text-[10px] text-zinc-400">
+                                          {new Date(order.time).toLocaleTimeString('id-ID')} • {order.source}
+                                        </span>
+                                      </td>
+                                      <td className="p-3">
+                                        <span className="font-bold text-zinc-900 block">{order.customerName}</span>
+                                        <span className="text-zinc-500 text-[11px]">{order.table} ({order.orderType === 'takeaway' ? 'Bungkus' : 'Dine In'})</span>
+                                      </td>
+                                      <td className="p-3">
+                                        <div className="space-y-0.5 max-w-xs">
+                                          {order.items.map((it, idx) => (
+                                            <div key={idx} className="text-zinc-700">
+                                              <b>{it.quantity}x</b> {it.name}
+                                            </div>
+                                          ))}
+                                          {order.notes && <div className="text-[10px] text-amber-800 bg-amber-50 p-1 rounded">Catatan: {order.notes}</div>}
+                                        </div>
+                                      </td>
+                                      <td className="p-3">
+                                        <span className="font-bold text-rose-600 block">Rp {order.total.toLocaleString('id-ID')}</span>
+                                        <span className="text-[10px] text-zinc-500">
+                                          {paymentMethods.find((p) => p.id === order.paymentMethod)?.name || order.paymentMethod}
+                                        </span>
+                                      </td>
+                                      <td className="p-3">
+                                        <div className="flex flex-wrap gap-1.5 items-center justify-center">
+                                          {order.status === 'unverified' && (
+                                            <>
+                                              <button
+                                                onClick={() => updateOrderStatus(order.id, 'processing')}
+                                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[11px] shadow-sm transition-colors"
+                                                title="Verifikasi dan teruskan ke dapur"
+                                              >
+                                                ✓ Terima
+                                              </button>
+                                              {/* Batal Pesanan: Khusus Admin */}
+                                              {isAdmin && (
+                                                <button
+                                                  onClick={() => handleCancelOrder(order.id)}
+                                                  className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg font-bold text-[11px] transition-colors"
+                                                  title="Batalkan pesanan ini (Khusus Admin)"
+                                                >
+                                                  ⛔ Batalkan
+                                                </button>
+                                              )}
+                                            </>
+                                          )}
+
+                                          {order.status === 'processing' && (
+                                            <>
+                                              <button
+                                                onClick={() => {
+                                                  updateOrderStatus(order.id, 'completed');
+                                                  setReceiptOrder({ ...order, status: 'completed' });
+                                                }}
+                                                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-[11px] shadow-sm transition-colors"
+                                                title="Tandai pesanan selesai dan cetak struk"
+                                              >
+                                                ✓ Selesai
+                                              </button>
+                                              {/* Batal Pesanan: Khusus Admin */}
+                                              {isAdmin && (
+                                                <button
+                                                  onClick={() => handleCancelOrder(order.id)}
+                                                  className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg font-bold text-[11px] transition-colors"
+                                                  title="Batalkan pesanan ini (Khusus Admin)"
+                                                >
+                                                  ⛔ Batalkan
+                                                </button>
+                                              )}
+                                            </>
+                                          )}
+
+                                          {order.status === 'completed' && (
+                                            <>
+                                              <button
+                                                onClick={() => {
+                                                  announceOrderCall(
+                                                    order.customerName || 'Pelanggan',
+                                                    order.id,
+                                                    settings.soundEnabled,
+                                                    settings.voiceType || 'female',
+                                                    settings.callTemplate,
+                                                    order.table || 'Meja'
+                                                  );
+                                                }}
+                                                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px] shadow-sm flex items-center space-x-1"
+                                                title="Panggil nama pelanggan lewat speaker"
+                                              >
+                                                <span>📢</span>
+                                                <span>Panggil</span>
+                                              </button>
+                                              <button
+                                                onClick={() => setReceiptOrder(order)}
+                                                className="px-2 py-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-[11px] font-semibold"
+                                                title="Lihat / cetak struk"
+                                              >
+                                                Struk
+                                              </button>
+                                              {/* Batal Pesanan: Khusus Admin */}
+                                              {isAdmin && (
+                                                <button
+                                                  onClick={() => handleCancelOrder(order.id)}
+                                                  className="px-2 py-1 bg-zinc-50 hover:bg-zinc-100 text-zinc-600 border border-zinc-200 rounded-lg text-[11px] font-medium"
+                                                  title="Ubah status menjadi dibatalkan (Khusus Admin)"
+                                                >
+                                                  Batal
+                                                </button>
+                                              )}
+                                            </>
+                                          )}
+
+                                          {order.status === 'cancelled' && (
+                                            isAdmin ? (
+                                              <button
+                                                onClick={() => updateOrderStatus(order.id, 'unverified')}
+                                                className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold text-[11px] transition-colors"
+                                                title="Pulihkan pesanan ini ke daftar menunggu (Khusus Admin)"
+                                              >
+                                                ↺ Pulihkan
+                                              </button>
+                                            ) : (
+                                              <span className="text-[11px] text-zinc-400 font-medium italic">
+                                                Dibatalkan
+                                              </span>
+                                            )
+                                          )}
+
+                                          {/* Hapus Transaksi Permanen: Khusus Admin */}
+                                          {isAdmin && (
+                                            <button
+                                              onClick={() => handleDeleteOrder(order.id)}
+                                              className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-[11px] font-bold border border-red-200 transition-colors"
+                                              title="Hapus transaksi ini secara permanen dari database (Khusus Admin)"
+                                            >
+                                              🗑️ Hapus
+                                            </button>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                    {orders.length === 0 && (
+                      <div className="bg-white rounded-2xl p-8 border border-zinc-200 text-center text-zinc-400 space-y-2">
+                        <span className="text-3xl block">📋</span>
+                        <p className="text-xs font-semibold">Belum ada pesanan yang masuk.</p>
+                        <p className="text-[11px] text-zinc-400">Pesanan dari kasir POS atau pemesanan mandiri QR pelanggan akan muncul di sini secara realtime.</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ANALYTICS TAB */}
+              {adminTab === 'analytics' && (() => {
+                const now = new Date();
+                const filteredOrders = orders.filter((o) => {
+                  if (analyticsDays === 0) return true;
+                  const orderDate = new Date(o.time);
+                  const diffDays = (now.getTime() - orderDate.getTime()) / (1000 * 60 * 60 * 24);
+                  return diffDays <= analyticsDays;
+                });
+
+                const completedOrders = filteredOrders.filter((o) => o.status === 'completed');
+                const cancelledOrders = filteredOrders.filter((o) => o.status === 'cancelled');
+                const unverifiedOrders = filteredOrders.filter((o) => o.status === 'unverified');
+                const processingOrders = filteredOrders.filter((o) => o.status === 'processing');
+
+                const totalRevenue = completedOrders.reduce((sum, o) => sum + o.total, 0);
+                const totalCompleted = completedOrders.length;
+                const aov = totalCompleted > 0 ? Math.round(totalRevenue / totalCompleted) : 0;
+
+                // Daily revenue timeline aggregation
+                const daysToGenerate = analyticsDays === 0 ? 14 : analyticsDays;
+                const dailyRevenueMap: { [key: string]: { date: string; fullDate: string; revenue: number; count: number } } = {};
+
+                for (let i = daysToGenerate - 1; i >= 0; i--) {
+                  const d = new Date();
+                  d.setDate(d.getDate() - i);
+                  const key = d.toISOString().slice(0, 10);
+                  const label = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+                  dailyRevenueMap[key] = { date: label, fullDate: key, revenue: 0, count: 0 };
+                }
+
+                completedOrders.forEach((o) => {
+                  const key = new Date(o.time).toISOString().slice(0, 10);
+                  if (dailyRevenueMap[key]) {
+                    dailyRevenueMap[key].revenue += o.total;
+                    dailyRevenueMap[key].count += 1;
+                  } else if (analyticsDays === 0) {
+                    const label = new Date(o.time).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+                    dailyRevenueMap[key] = { date: label, fullDate: key, revenue: o.total, count: 1 };
+                  }
+                });
+
+                const dailyChartData = Object.values(dailyRevenueMap);
+
+                // Top Selling Items aggregation
+                const itemSalesMap: {
+                  [name: string]: { name: string; category: string; quantity: number; revenue: number; price: number };
+                } = {};
+
+                completedOrders.forEach((o) => {
+                  o.items.forEach((it) => {
+                    if (!itemSalesMap[it.name]) {
+                      itemSalesMap[it.name] = {
+                        name: it.name,
+                        category: it.category || 'Menu',
+                        quantity: 0,
+                        revenue: 0,
+                        price: it.price
+                      };
+                    }
+                    itemSalesMap[it.name].quantity += it.quantity;
+                    itemSalesMap[it.name].revenue += it.price * it.quantity;
+                  });
+                });
+
+                const topMenuItems = Object.values(itemSalesMap).sort((a, b) => b.quantity - a.quantity);
+                const top1Dish = topMenuItems[0];
+
+                const barChartData = topMenuItems.slice(0, 7).map((item) => ({
+                  name: item.name.length > 14 ? item.name.substring(0, 14) + '…' : item.name,
+                  fullName: item.name,
+                  porsi: item.quantity,
+                  omset: item.revenue
+                }));
+
+                // Payment Breakdown
+                const paymentSummary: { [key: string]: { name: string; count: number; total: number } } = {};
+                completedOrders.forEach((o) => {
+                  const pm = paymentMethods.find((p) => p.id === o.paymentMethod);
+                  const pmName = pm ? pm.name : (o.paymentMethod || 'Tunai');
+                  if (!paymentSummary[pmName]) {
+                    paymentSummary[pmName] = { name: pmName, count: 0, total: 0 };
+                  }
+                  paymentSummary[pmName].count += 1;
+                  paymentSummary[pmName].total += o.total;
+                });
+
+                const dineInCount = completedOrders.filter((o) => o.orderType === 'dine-in').length;
+                const takeawayCount = completedOrders.filter((o) => o.orderType === 'takeaway').length;
+
+                return (
+                  <div className="space-y-5 pb-6">
+                    {/* Filter Period Header */}
+                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-zinc-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-sm text-zinc-900 flex items-center gap-2">
+                          <span>📊</span>
+                          <span>Analitik Penjualan & Performa Resto</span>
+                        </h3>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          Visualisasi pendapatan harian dan menu terlaris secara langsung dari transaksi kasir & QR.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 bg-zinc-100 p-1 rounded-xl">
+                        {[
+                          { label: '7 Hari', days: 7 },
+                          { label: '30 Hari', days: 30 },
+                          { label: 'Semua Waktu', days: 0 }
+                        ].map((btn) => (
+                          <button
+                            key={btn.days}
+                            onClick={() => setAnalyticsDays(btn.days)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              analyticsDays === btn.days
+                                ? 'bg-white text-zinc-900 shadow-sm'
+                                : 'text-zinc-600 hover:text-zinc-900'
+                            }`}
+                          >
+                            {btn.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* KPI Cards Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                      <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm relative overflow-hidden">
+                        <div className="w-1.5 h-full bg-rose-500 absolute top-0 left-0" />
+                        <span className="text-zinc-500 text-xs font-semibold block">Total Pendapatan (Omset)</span>
+                        <h4 className="text-lg sm:text-xl font-black text-rose-600 mt-1">
+                          Rp {totalRevenue.toLocaleString('id-ID')}
+                        </h4>
+                        <span className="text-[11px] text-zinc-400 mt-1 block">
+                          Dari {totalCompleted} transaksi sukses
+                        </span>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm relative overflow-hidden">
+                        <div className="w-1.5 h-full bg-emerald-500 absolute top-0 left-0" />
+                        <span className="text-zinc-500 text-xs font-semibold block">Rata-Rata Transaksi (AOV)</span>
+                        <h4 className="text-lg sm:text-xl font-black text-zinc-900 mt-1">
+                          Rp {aov.toLocaleString('id-ID')}
+                        </h4>
+                        <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">
+                          Nilai rata-rata per struk
+                        </span>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm relative overflow-hidden">
+                        <div className="w-1.5 h-full bg-blue-500 absolute top-0 left-0" />
+                        <span className="text-zinc-500 text-xs font-semibold block">Menu Paling Laris #1</span>
+                        <h4 className="text-base font-bold text-zinc-900 mt-1 truncate" title={top1Dish ? top1Dish.name : '-'}>
+                          {top1Dish ? top1Dish.name : 'Belum Ada Data'}
+                        </h4>
+                        <span className="text-[11px] text-blue-600 font-semibold mt-1 block">
+                          {top1Dish ? `${top1Dish.quantity} porsi terjual (Rp ${top1Dish.revenue.toLocaleString('id-ID')})` : '0 porsi'}
+                        </span>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm relative overflow-hidden">
+                        <div className="w-1.5 h-full bg-amber-500 absolute top-0 left-0" />
+                        <span className="text-zinc-500 text-xs font-semibold block">Aktivitas Pesanan</span>
+                        <div className="flex items-baseline space-x-2 mt-1">
+                          <span className="text-lg font-black text-zinc-900">{filteredOrders.length}</span>
+                          <span className="text-xs text-zinc-500">Total Masuk</span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-[10px] text-zinc-500 mt-1">
+                          <span className="text-emerald-600 font-bold">{totalCompleted} Selesai</span>
+                          <span>•</span>
+                          <span className="text-amber-600 font-bold">{unverifiedOrders.length + processingOrders.length} Proses</span>
+                          <span>•</span>
+                          <span className="text-rose-600 font-bold">{cancelledOrders.length} Batal</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* CHARTS GRID */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* Grafik Pendapatan Harian */}
+                      <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm flex flex-col">
+                        <div className="flex justify-between items-center mb-3">
+                          <div>
+                            <h4 className="font-bold text-sm text-zinc-900">Grafik Pendapatan Harian</h4>
+                            <p className="text-[11px] text-zinc-500">Tren penjualan selesai per tanggal</p>
+                          </div>
+                          <span className="text-xs font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
+                            Rp {totalRevenue.toLocaleString('id-ID')}
+                          </span>
                         </div>
 
-                        <div className="overflow-x-auto">
+                        <div className="w-full h-72 min-h-[280px]">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={dailyChartData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                              <defs>
+                                <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#e11d48" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="#e11d48" stopOpacity={0.0} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                              <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                              <YAxis
+                                stroke="#94a3b8"
+                                fontSize={11}
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={(v) =>
+                                  v >= 1000000 ? `${(v / 1000000).toFixed(1)}jt` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`
+                                }
+                              />
+                              <Tooltip
+                                content={({ active, payload, label }) => {
+                                  if (active && payload && payload.length) {
+                                    const val = payload[0].value as number;
+                                    const count = payload[0].payload.count as number;
+                                    return (
+                                      <div className="bg-zinc-900 text-white p-2.5 rounded-xl text-xs shadow-xl border border-zinc-700">
+                                        <p className="font-bold text-zinc-300">{label}</p>
+                                        <p className="font-black text-rose-400 text-sm mt-0.5">Rp {val.toLocaleString('id-ID')}</p>
+                                        <p className="text-[10px] text-zinc-400 mt-0.5">{count} Transaksi Selesai</p>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                }}
+                              />
+                              <Area
+                                type="monotone"
+                                dataKey="revenue"
+                                stroke="#e11d48"
+                                strokeWidth={2.5}
+                                fillOpacity={1}
+                                fill="url(#colorRevenue)"
+                              />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      {/* Grafik Menu Terlaris */}
+                      <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm flex flex-col">
+                        <div className="flex justify-between items-center mb-3">
+                          <div>
+                            <h4 className="font-bold text-sm text-zinc-900">Grafik Menu Terlaris (Porsi)</h4>
+                            <p className="text-[11px] text-zinc-500">Top 7 hidangan yang paling banyak dipesan</p>
+                          </div>
+                          <span className="text-xs font-bold text-zinc-600 bg-zinc-100 px-2 py-0.5 rounded-lg border border-zinc-200">
+                            {topMenuItems.length} Menu Terjual
+                          </span>
+                        </div>
+
+                        {barChartData.length === 0 ? (
+                          <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 py-10">
+                            <span className="text-3xl mb-1">🍽️</span>
+                            <p className="text-xs">Belum ada menu yang terjual pada periode ini.</p>
+                          </div>
+                        ) : (
+                          <div className="w-full h-72 min-h-[280px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={barChartData} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis
+                                  dataKey="name"
+                                  stroke="#94a3b8"
+                                  fontSize={10}
+                                  tickLine={false}
+                                  interval={0}
+                                  angle={-20}
+                                  textAnchor="end"
+                                />
+                                <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                                <Tooltip
+                                  content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                      const data = payload[0].payload;
+                                      return (
+                                        <div className="bg-zinc-900 text-white p-2.5 rounded-xl text-xs shadow-xl border border-zinc-700">
+                                          <p className="font-bold text-zinc-200">{data.fullName}</p>
+                                          <p className="font-bold text-amber-400 mt-0.5">{data.porsi} Porsi Terjual</p>
+                                          <p className="text-[10px] text-zinc-400">Total Omset: Rp {data.omset.toLocaleString('id-ID')}</p>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  }}
+                                />
+                                <Bar dataKey="porsi" fill="#e11d48" radius={[6, 6, 0, 0]}>
+                                  {barChartData.map((_, index) => (
+                                    <Cell
+                                      key={`cell-${index}`}
+                                      fill={index === 0 ? '#e11d48' : index === 1 ? '#f43f5e' : index === 2 ? '#fb7185' : '#fda4af'}
+                                    />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Breakdown & Top Menu Ranking Table */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      {/* Metode Pembayaran & Tipe Pesanan */}
+                      <div className="space-y-4">
+                        <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm space-y-3">
+                          <h4 className="font-bold text-xs sm:text-sm text-zinc-900">Distribusi Metode Pembayaran</h4>
+                          <div className="space-y-2">
+                            {Object.values(paymentSummary).length === 0 ? (
+                              <p className="text-xs text-zinc-400">Belum ada transaksi.</p>
+                            ) : (
+                              Object.values(paymentSummary).map((pm) => {
+                                const percent = totalRevenue > 0 ? Math.round((pm.total / totalRevenue) * 100) : 0;
+                                return (
+                                  <div key={pm.name} className="space-y-1">
+                                    <div className="flex justify-between text-xs">
+                                      <span className="font-bold text-zinc-800">{pm.name}</span>
+                                      <span className="text-zinc-500 font-semibold">
+                                        Rp {pm.total.toLocaleString('id-ID')} ({percent}%)
+                                      </span>
+                                    </div>
+                                    <div className="w-full bg-zinc-100 rounded-full h-2 overflow-hidden">
+                                      <div className="bg-rose-600 h-2 rounded-full" style={{ width: `${percent}%` }} />
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm space-y-3">
+                          <h4 className="font-bold text-xs sm:text-sm text-zinc-900">Tipe Layanan Pesanan</h4>
+                          <div className="grid grid-cols-2 gap-2 text-center">
+                            <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
+                              <span className="text-lg block">🍽️</span>
+                              <span className="text-xs font-bold text-zinc-800 block mt-1">Dine In</span>
+                              <span className="text-xs text-rose-600 font-extrabold">{dineInCount} Pesanan</span>
+                            </div>
+                            <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
+                              <span className="text-lg block">🛍️</span>
+                              <span className="text-xs font-bold text-zinc-800 block mt-1">Takeaway</span>
+                              <span className="text-xs text-rose-600 font-extrabold">{takeawayCount} Pesanan</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Ranking Top Menu Items Table */}
+                      <div className="lg:col-span-2 bg-white rounded-2xl border border-zinc-200 shadow-sm overflow-hidden flex flex-col">
+                        <div className="p-4 bg-zinc-50 border-b border-zinc-200 flex justify-between items-center">
+                          <div>
+                            <h4 className="font-bold text-xs sm:text-sm text-zinc-900">Peringkat Menu Paling Laris</h4>
+                            <p className="text-[11px] text-zinc-500">Urutan hidangan berdasarkan kuantitas porsi terjual</p>
+                          </div>
+                          <span className="text-[11px] font-bold px-2.5 py-1 bg-white rounded-lg border border-zinc-200 text-zinc-700">
+                            Top 10 Menu
+                          </span>
+                        </div>
+
+                        <div className="overflow-x-auto flex-1">
                           <table className="w-full text-left border-collapse text-xs">
                             <thead>
                               <tr className="border-b border-zinc-200 text-[11px] font-bold text-zinc-500 uppercase bg-zinc-50/50">
-                                <th className="p-3">ID & Waktu</th>
-                                <th className="p-3">Pemesan & Meja</th>
-                                <th className="p-3">Detail Menu</th>
-                                <th className="p-3">Total & Bayar</th>
-                                <th className="p-3 text-center">Aksi Status</th>
+                                <th className="p-3 w-12 text-center">#</th>
+                                <th className="p-3">Nama Menu</th>
+                                <th className="p-3">Kategori</th>
+                                <th className="p-3 text-right">Harga</th>
+                                <th className="p-3 text-center">Terjual</th>
+                                <th className="p-3 text-right">Total Omset</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-100">
-                              {list.map((order) => (
-                                <tr key={order.id} className="hover:bg-zinc-50 transition-colors">
-                                  <td className="p-3">
-                                    <span className="font-mono font-bold text-zinc-900 block">{order.id}</span>
-                                    <span className="text-[10px] text-zinc-400">
-                                      {new Date(order.time).toLocaleTimeString('id-ID')} • {order.source}
-                                    </span>
-                                  </td>
-                                  <td className="p-3">
-                                    <span className="font-bold text-zinc-900 block">{order.customerName}</span>
-                                    <span className="text-zinc-500 text-[11px]">{order.table} ({order.orderType})</span>
-                                  </td>
-                                  <td className="p-3">
-                                    <div className="space-y-0.5 max-w-xs">
-                                      {order.items.map((it, idx) => (
-                                        <div key={idx} className="text-zinc-700">
-                                          <b>{it.quantity}x</b> {it.name}
-                                        </div>
-                                      ))}
-                                      {order.notes && <div className="text-[10px] text-amber-800 bg-amber-50 p-1 rounded">Catatan: {order.notes}</div>}
-                                    </div>
-                                  </td>
-                                  <td className="p-3">
-                                    <span className="font-bold text-rose-600 block">Rp {order.total.toLocaleString('id-ID')}</span>
-                                    <span className="text-[10px] text-zinc-500">
-                                      {paymentMethods.find((p) => p.id === order.paymentMethod)?.name || order.paymentMethod}
-                                    </span>
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    <div className="flex flex-col gap-1 items-center">
-                                      {order.status === 'unverified' && (
-                                        <button
-                                          onClick={() => updateOrderStatus(order.id, 'processing')}
-                                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm transition-colors"
-                                        >
-                                          Terima & Masak
-                                        </button>
-                                      )}
-                                      {order.status === 'processing' && (
-                                        <button
-                                          onClick={() => {
-                                            updateOrderStatus(order.id, 'completed');
-                                            setReceiptOrder({ ...order, status: 'completed' });
-                                          }}
-                                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-sm transition-colors"
-                                        >
-                                          Selesai & Buat Struk
-                                        </button>
-                                      )}
-                                      {order.status === 'completed' && (
-                                        <>
-                                          <button
-                                            onClick={() => {
-                                              announceOrderCall(
-                                                order.customerName || 'Pelanggan',
-                                                order.id,
-                                                settings.soundEnabled,
-                                                settings.voiceType || 'female',
-                                                settings.callTemplate,
-                                                order.table || 'Meja'
-                                              );
-                                            }}
-                                            className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px] shadow-sm flex items-center space-x-1"
-                                          >
-                                            <span>📢</span>
-                                            <span>Panggil Pelanggan</span>
-                                          </button>
-                                          <button
-                                            onClick={() => setReceiptOrder(order)}
-                                            className="px-2.5 py-0.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded text-[11px] font-semibold"
-                                          >
-                                            Struk
-                                          </button>
-                                        </>
-                                      )}
-                                    </div>
+                              {topMenuItems.length === 0 ? (
+                                <tr>
+                                  <td colSpan={6} className="p-6 text-center text-zinc-400 text-xs">
+                                    Belum ada data transaksi menu pada periode ini.
                                   </td>
                                 </tr>
-                              ))}
+                              ) : (
+                                topMenuItems.slice(0, 10).map((item, idx) => (
+                                  <tr key={item.name} className="hover:bg-zinc-50 transition-colors">
+                                    <td className="p-3 text-center">
+                                      <span
+                                        className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-black ${
+                                          idx === 0
+                                            ? 'bg-amber-400 text-amber-950'
+                                            : idx === 1
+                                            ? 'bg-zinc-300 text-zinc-800'
+                                            : idx === 2
+                                            ? 'bg-amber-600/30 text-amber-900'
+                                            : 'bg-zinc-100 text-zinc-600'
+                                        }`}
+                                      >
+                                        {idx + 1}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 font-bold text-zinc-900">{item.name}</td>
+                                    <td className="p-3">
+                                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-zinc-100 text-zinc-700">
+                                        {item.category}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-right font-medium text-zinc-600">
+                                      Rp {item.price.toLocaleString('id-ID')}
+                                    </td>
+                                    <td className="p-3 text-center font-bold text-rose-600">
+                                      {item.quantity} porsi
+                                    </td>
+                                    <td className="p-3 text-right font-bold text-zinc-900">
+                                      Rp {item.revenue.toLocaleString('id-ID')}
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
                             </tbody>
                           </table>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* MENU CATALOG TAB */}
               {adminTab === 'menu' && (() => {
@@ -3582,6 +4245,47 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL: Custom Alert & Confirmation */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl border border-zinc-100">
+            <h3 className="text-base font-bold text-zinc-900 mb-2">{modalConfig.title}</h3>
+            <p className="text-xs text-zinc-600 mb-4 leading-relaxed">{modalConfig.message}</p>
+            <div className="flex gap-2">
+              {modalConfig.onConfirm ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cb = modalConfig.onConfirm;
+                      closeAlert();
+                      if (cb) cb();
+                    }}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-xs shadow transition-colors"
+                  >
+                    Ya, Lanjutkan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeAlert}
+                    className="flex-1 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 font-bold py-2.5 rounded-xl text-xs transition-colors"
+                  >
+                    Batal
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={closeAlert}
+                  className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 rounded-xl text-xs shadow transition-colors"
+                >
+                  Tutup
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

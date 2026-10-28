@@ -237,6 +237,15 @@ export async function updateOrderStatus(orderId: string, status: Order['status']
   }
 }
 
+export async function deleteOrder(orderId: string): Promise<void> {
+  const path = `orders/${orderId}`;
+  try {
+    await deleteDoc(doc(db, 'orders', orderId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 export async function saveSettings(settings: Settings): Promise<void> {
   const path = 'settings/general';
   try {
